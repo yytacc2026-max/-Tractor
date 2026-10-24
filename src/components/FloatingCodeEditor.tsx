@@ -8,7 +8,8 @@ interface FloatingCodeEditorProps {
   activeScriptId: string;
   onSelectScript: (id: string) => void;
   onUpdateCode: (code: string) => void;
-  onAddScript: () => void;
+  onAddScript: (customName?: string) => string;
+  onRenameScript: (id: string, newName: string) => void;
   isRunning: boolean;
   isStepWaiting: boolean;
   activeLine: number | null;
@@ -40,6 +41,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
   onSelectScript,
   onUpdateCode,
   onAddScript,
+  onRenameScript,
   isRunning,
   isStepWaiting,
   activeLine,
@@ -53,6 +55,10 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [showConsole, setShowConsole] = useState(true);
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
   const [position, setPosition] = useState<{ x: number; y: number }>({
     x: Math.max(20, typeof window !== 'undefined' ? Math.floor(window.innerWidth * 0.5 - 270) : 280),
     y: Math.max(80, typeof window !== 'undefined' ? window.innerHeight - 310 : 420),
@@ -79,6 +85,13 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
   const codeLines = activeScript.code.split('\n');
 
   useEffect(() => {
+    if (editingTabId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [editingTabId]);
+
+  useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       if (!dragRef.current.dragging) return;
       const dx = e.clientX - dragRef.current.startX;
@@ -102,8 +115,27 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
 
   if (!isOpen) return null;
 
+  const commitRename = () => {
+    if (editingTabId) {
+      const cleaned = editingName.trim();
+      if (cleaned.length > 0) {
+        onRenameScript(editingTabId, cleaned);
+      }
+      setEditingTabId(null);
+    }
+  };
+
+  const handleCreateAndRenameScript = () => {
+    const newId = onAddScript();
+    const defaultName = `script_${scripts.length + 1}`;
+    setEditingTabId(newId);
+    setEditingName(defaultName);
+  };
+
   const handleHeaderPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
+      return;
+    }
     dragRef.current = {
       dragging: true,
       startX: e.clientX,
@@ -147,14 +179,14 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
       style={{
         transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
       }}
-      className="fixed top-0 left-0 z-30 w-[540px] max-w-[95vw] pointer-events-auto rounded-md border border-[#52565A] bg-[#232527] shadow-2xl"
+      className="fixed top-0 left-0 z-30 w-[560px] max-w-[95vw] pointer-events-auto rounded-md border border-[#52565A] bg-[#232527] shadow-2xl"
     >
-      {/* Window Header — Styled Directly After Reference Screenshot */}
+      {/* Window Header */}
       <div
         onPointerDown={handleHeaderPointerDown}
         className="flex items-center justify-between gap-2 px-2.5 py-2 bg-[#474A4D] border-b border-[#5A5E62] cursor-move rounded-t-md select-none"
       >
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
           {/* Play / Run Button */}
           {!isRunning || isStepWaiting ? (
             <button
@@ -178,7 +210,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
             </button>
           )}
 
-          {/* Step Button (Outline Triangle like Reference Screenshot) */}
+          {/* Step Button */}
           <button
             onClick={onStep}
             title="Step 1 Line"
@@ -189,25 +221,71 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
             </svg>
           </button>
 
-          {/* Script File Tabs (`main`, etc.) */}
-          <div className="flex items-center gap-1 ml-1 overflow-x-auto">
-            {scripts.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => onSelectScript(tab.id)}
-                className={`px-2.5 py-1 text-xs font-mono-code rounded transition-colors whitespace-nowrap shrink-0 ${
-                  tab.id === activeScript.id
-                    ? 'bg-[#232527] text-white font-semibold border border-[#658B1E]'
-                    : 'text-[#D0D4D8] hover:bg-[#36393C]'
-                }`}
-              >
-                {tab.name}
-              </button>
-            ))}
+          {/* Script File Tabs (`main`, etc.) with Inline Rename */}
+          <div className="flex items-center gap-1 ml-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {scripts.map((tab) => {
+              const isEditingThis = editingTabId === tab.id;
+              const isActive = tab.id === activeScript.id;
+
+              if (isEditingThis) {
+                return (
+                  <input
+                    key={tab.id}
+                    ref={renameInputRef}
+                    type="text"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitRename();
+                      } else if (e.key === 'Escape') {
+                        setEditingTabId(null);
+                      }
+                    }}
+                    className="w-28 px-2 py-0.5 text-xs font-mono-code rounded bg-[#181A1C] text-white border border-[#9CD03B] focus:outline-none shrink-0"
+                  />
+                );
+              }
+
+              return (
+                <div key={tab.id} className="flex items-center shrink-0">
+                  <button
+                    onClick={() => onSelectScript(tab.id)}
+                    onDoubleClick={() => {
+                      setEditingTabId(tab.id);
+                      setEditingName(tab.name);
+                    }}
+                    title="Klik untuk buka · Klik 2x untuk ganti nama script"
+                    className={`px-2.5 py-1 text-xs font-mono-code rounded transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+                      isActive
+                        ? 'bg-[#232527] text-white font-semibold border border-[#658B1E]'
+                        : 'text-[#D0D4D8] hover:bg-[#36393C]'
+                    }`}
+                  >
+                    <span>{tab.name}</span>
+                    {isActive && (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTabId(tab.id);
+                          setEditingName(tab.name);
+                        }}
+                        title="Ganti nama script"
+                        className="text-[10px] text-[#9DA5AE] hover:text-[#A8E040] px-0.5 cursor-pointer"
+                      >
+                        ✎
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
             <button
-              onClick={onAddScript}
-              title="New Script Tab"
-              className="px-2 py-0.5 text-xs font-mono-code rounded bg-[#36393C] hover:bg-[#658B1E] text-white transition-colors shrink-0"
+              onClick={handleCreateAndRenameScript}
+              title="Tambah Script Baru (Langsung beri nama)"
+              className="px-2 py-0.5 text-xs font-mono-code rounded bg-[#36393C] hover:bg-[#658B1E] text-white transition-colors shrink-0 cursor-pointer"
             >
               +
             </button>
@@ -252,7 +330,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
       {!isMinimized && (
         <>
           {/* Quick Touch/Click Python API Snippet Bar */}
-          <div className="flex items-center gap-1 px-2.5 py-1.5 bg-[#2A2D30] border-b border-[#3A3D40] overflow-x-auto">
+          <div className="flex items-center gap-1 px-2.5 py-1.5 bg-[#2A2D30] border-b border-[#3A3D40] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {QUICK_SNIPPETS.map((item) => (
               <button
                 key={item.label}

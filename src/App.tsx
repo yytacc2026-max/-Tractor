@@ -24,11 +24,17 @@ import {
 } from './data/techTreeData';
 import { FarmViewport3D } from './components/FarmViewport3D';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
-import { AiOptimizerModal, ApiDocsModal, TechTreeModal } from './components/ModalsAndDocs';
+import {
+  AiOptimizerModal,
+  ApiDocsModal,
+  TechTreeModal,
+  renderNodeCenterVisual,
+  renderResourceIcon,
+} from './components/ModalsAndDocs';
 import { AgroPythonInterpreter } from './engine/pythonInterpreter';
 import { soundFX } from './utils/sound';
 
-function createInitialGrid(size: number): TileData[][] {
+function createInitialGrid(size: number, irrigationLevel = 0): TileData[][] {
   const grid: TileData[][] = [];
   for (let z = 0; z < size; z++) {
     const row: TileData[] = [];
@@ -42,7 +48,7 @@ function createInitialGrid(size: number): TileData[][] {
         terrain = 'pom_bensin';
       } else if (x === size - 1 && z === 0) {
         terrain = 'gudang';
-      } else if ((x === 1 && z === 2) || (x === 2 && z === 3)) {
+      } else if (irrigationLevel === 0 && ((x === 1 && z === 2) || (x === 2 && z === 3))) {
         terrain = 'lumpur';
       } else if ((x === 1 && z === 1) || (x === 2 && z === 1)) {
         soilState = 'siap_panen';
@@ -79,17 +85,18 @@ export default function App() {
   const [screen, setScreen] = useState<GameShellScreen>('title');
   const [isMuted, setIsMuted] = useState<boolean>(false);
 
-  // Farm Grid & Warehouse Inventory (Wheat, Wood, Carrot, Corn — No Stone!)
+  // Farm Grid & Warehouse Inventory (Wheat, Wood, Carrot, Corn)
   const [tiles, setTiles] = useState<TileData[][]>(() => createInitialGrid(4));
   const [warehouse, setWarehouse] = useState<Inventory>({
-    jerami: 2,
+    jerami: 4,
     kayu: 0,
     wortel: 0,
     jagung: 0,
   });
 
-  // Tractor State
+  // Primary Tractor (#1) & Extra Fleet Tractors (#2, #3, #4)
   const [tractor, setTractor] = useState<TractorState>({
+    id: 0,
     x: 1,
     z: 1,
     direction: 'selatan',
@@ -102,6 +109,7 @@ export default function App() {
     statusMessage: 'Ready to execute Python script.',
   });
 
+  const [extraTractors, setExtraTractors] = useState<TractorState[]>([]);
   const [selectedTile, setSelectedTile] = useState<{ x: number; z: number } | null>({ x: 1, z: 1 });
 
   // Tech Tree & Modals
@@ -127,10 +135,14 @@ export default function App() {
     },
   ]);
 
+  const startTimeRef = useRef<number>(Date.now());
   const tilesRef = useRef(tiles);
   tilesRef.current = tiles;
   const tractorRef = useRef(tractor);
   tractorRef.current = tractor;
+  const extraTractorsRef = useRef(extraTractors);
+  extraTractorsRef.current = extraTractors;
+  const activeTractorIdxRef = useRef<number>(0);
   const techNodesRef = useRef(techNodes);
   techNodesRef.current = techNodes;
   const speedRef = useRef(executionSpeed);
@@ -158,39 +170,6 @@ export default function App() {
     []
   );
 
-  // Passive Crop Growth Loop
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTiles((prevGrid) => {
-        let changed = false;
-        const nextGrid = prevGrid.map((row) =>
-          row.map((tile) => {
-            if (tile.soilState === 'ditanam' && tile.crop) {
-              const rate =
-                tile.crop === 'jerami'
-                  ? 0.25
-                  : tile.crop === 'wortel'
-                  ? 0.2
-                  : tile.crop === 'kayu'
-                  ? 0.16
-                  : 0.14;
-              const nextGrowth = Math.min(1, tile.growth + rate);
-              const nextState = nextGrowth >= 1 ? 'siap_panen' : 'ditanam';
-              changed = true;
-              return { ...tile, growth: nextGrowth, soilState: nextState };
-            }
-            return tile;
-          })
-        );
-        return changed ? nextGrid : prevGrid;
-      });
-    }, 900);
-    return () => clearInterval(interval);
-  }, []);
-
-  const getTotalCargo = (cargo: Inventory) =>
-    cargo.jerami + cargo.kayu + cargo.wortel + cargo.jagung;
-
   const isNodeUnlocked = useCallback((nodeId: string) => {
     const found = techNodesRef.current.find((n) => n.id === nodeId);
     return Boolean(found && (found.unlocked || found.level > 0));
@@ -200,47 +179,108 @@ export default function App() {
     return techNodesRef.current.find((n) => n.id === nodeId)?.level ?? 0;
   }, []);
 
+  // Passive Crop Growth Loop (Accelerated by Fertilizer Level & Wheat Level)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const fertLevel = getNodeLevel('alat_pupuk');
+      const wheatLevel = Math.max(1, getNodeLevel('logistik_dasar'));
+      const fertMultiplier = 1 + fertLevel * 0.22;
+
+      setTiles((prevGrid) => {
+        let changed = false;
+        const nextGrid = prevGrid.map((row) =>
+          row.map((tile) => {
+            if (tile.soilState === 'ditanam' && tile.crop) {
+              const baseRate =
+                tile.crop === 'jerami'
+                  ? 0.24 * (1 + (wheatLevel - 1) * 0.08)
+                  : tile.crop === 'wortel'
+                  ? 0.2
+                  : tile.crop === 'kayu'
+                  ? 0.16
+                  : 0.15;
+              const nextGrowth = Math.min(1, tile.growth + baseRate * fertMultiplier);
+              const nextState = nextGrowth >= 1 ? 'siap_panen' : 'ditanam';
+              changed = true;
+              return { ...tile, growth: nextGrowth, soilState: nextState };
+            }
+            return tile;
+          })
+        );
+        return changed ? nextGrid : prevGrid;
+      });
+    }, 850);
+    return () => clearInterval(interval);
+  }, [getNodeLevel]);
+
+  const getTotalCargo = (cargo: Inventory) =>
+    cargo.jerami + cargo.kayu + cargo.wortel + cargo.jagung;
+
   const sleepTick = async (baseMs: number) => {
     const tractorSpeedLv = Math.max(1, getNodeLevel('alat_dasar'));
     const speedBonus = 1 + (tractorSpeedLv - 1) * 0.25;
-    const ms = Math.max(45, Math.round(baseMs / (speedRef.current * speedBonus)));
+    const ms = Math.max(40, Math.round(baseMs / (speedRef.current * speedBonus)));
     await new Promise((r) => setTimeout(r, ms));
   };
 
-  // Python API Tractor Actions
-  const actionTurn = useCallback(async (dirInput: string) => {
-    const curDir = tractorRef.current.direction;
-    const idx = DIRECTION_ORDER.indexOf(curDir);
-    let nextDir: Direction = curDir;
-
-    if (dirInput === 'right' || dirInput === 'kanan') {
-      nextDir = DIRECTION_ORDER[(idx + 1) % 4];
-    } else if (dirInput === 'left' || dirInput === 'kiri') {
-      nextDir = DIRECTION_ORDER[(idx + 3) % 4];
-    } else if (dirInput === 'north' || dirInput === 'utara') {
-      nextDir = 'utara';
-    } else if (dirInput === 'east' || dirInput === 'timur') {
-      nextDir = 'timur';
-    } else if (dirInput === 'south' || dirInput === 'selatan') {
-      nextDir = 'selatan';
-    } else if (dirInput === 'west' || dirInput === 'barat') {
-      nextDir = 'barat';
-    }
-
-    const nextTractor = {
-      ...tractorRef.current,
-      direction: nextDir,
-      statusMessage: `turn("${DIR_TO_EN[nextDir]}")`,
-    };
-    tractorRef.current = nextTractor;
-    setTractor(nextTractor);
-    await sleepTick(200);
+  // Helper to get or update a specific tractor by index (0 = primary, 1..3 = extraTractors)
+  const getTargetTractor = useCallback((idx?: number): TractorState => {
+    const resolvedIdx = idx !== undefined ? idx : activeTractorIdxRef.current;
+    if (resolvedIdx <= 0) return tractorRef.current;
+    return extraTractorsRef.current[resolvedIdx - 1] || tractorRef.current;
   }, []);
 
+  const updateTargetTractor = useCallback((idx: number | undefined, updater: (prev: TractorState) => TractorState) => {
+    const resolvedIdx = idx !== undefined ? idx : activeTractorIdxRef.current;
+    if (resolvedIdx <= 0 || !extraTractorsRef.current[resolvedIdx - 1]) {
+      const next = updater(tractorRef.current);
+      tractorRef.current = next;
+      setTractor(next);
+    } else {
+      const eIdx = resolvedIdx - 1;
+      const nextExtras = [...extraTractorsRef.current];
+      nextExtras[eIdx] = updater(nextExtras[eIdx]);
+      extraTractorsRef.current = nextExtras;
+      setExtraTractors(nextExtras);
+    }
+  }, []);
+
+  // Python API Tractor Actions
+  const actionTurn = useCallback(
+    async (dirInput: string, tractorIdx?: number) => {
+      const cur = getTargetTractor(tractorIdx);
+      const curDir = cur.direction;
+      const idx = DIRECTION_ORDER.indexOf(curDir);
+      let nextDir: Direction = curDir;
+
+      if (dirInput === 'right' || dirInput === 'kanan') {
+        nextDir = DIRECTION_ORDER[(idx + 1) % 4];
+      } else if (dirInput === 'left' || dirInput === 'kiri') {
+        nextDir = DIRECTION_ORDER[(idx + 3) % 4];
+      } else if (dirInput === 'north' || dirInput === 'utara') {
+        nextDir = 'utara';
+      } else if (dirInput === 'east' || dirInput === 'timur') {
+        nextDir = 'timur';
+      } else if (dirInput === 'south' || dirInput === 'selatan') {
+        nextDir = 'selatan';
+      } else if (dirInput === 'west' || dirInput === 'barat') {
+        nextDir = 'barat';
+      }
+
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        direction: nextDir,
+        statusMessage: `turn("${DIR_TO_EN[nextDir]}")`,
+      }));
+      await sleepTick(180);
+    },
+    [getTargetTractor, updateTargetTractor]
+  );
+
   const actionMove = useCallback(
-    async (arg: number | string = 1) => {
+    async (arg: number | string = 1, tractorIdx?: number) => {
       if (typeof arg === 'string') {
-        await actionTurn(arg);
+        await actionTurn(arg, tractorIdx);
         arg = 1;
       }
       const steps = typeof arg === 'number' ? arg : 1;
@@ -248,7 +288,7 @@ export default function App() {
 
       for (let s = 0; s < steps; s++) {
         if (stopRequestedRef.current) return;
-        const cur = tractorRef.current;
+        const cur = getTargetTractor(tractorIdx);
 
         if (cur.fuel <= 0) {
           soundFX.playError();
@@ -271,100 +311,98 @@ export default function App() {
 
         const destTile = tilesRef.current[nz][nx];
         const isMud = destTile.terrain === 'lumpur';
-        const fuelCost = isMud ? 4 : 2;
+        const fuelCost = isMud ? 4 : 1.5;
 
         soundFX.playMove(isMud, false);
 
-        const nextTractor: TractorState = {
-          ...cur,
+        updateTargetTractor(tractorIdx, (prev) => ({
+          ...prev,
           x: nx,
           z: nz,
-          fuel: Math.max(0, cur.fuel - fuelCost),
+          fuel: Math.max(0, prev.fuel - fuelCost),
           isMoving: true,
           statusMessage: `move() -> (${nx}, ${nz})`,
-        };
-        tractorRef.current = nextTractor;
-        setTractor(nextTractor);
+        }));
         setSelectedTile({ x: nx, z: nz });
 
-        await sleepTick(isMud ? 520 : 340);
+        await sleepTick(isMud ? 460 : 300);
 
-        const settled = { ...tractorRef.current, isMoving: false };
-        tractorRef.current = settled;
-        setTractor(settled);
+        updateTargetTractor(tractorIdx, (prev) => ({ ...prev, isMoving: false }));
       }
     },
-    [actionTurn, addLog]
+    [actionTurn, addLog, getTargetTractor, updateTargetTractor]
   );
 
-  const actionEquip = useCallback(async (toolInput: string) => {
-    const mapTool: Record<string, ImplementType> = {
-      none: 'kosong',
-      kosong: 'kosong',
-      plow: 'bajak',
-      bajak: 'bajak',
-      seeder: 'penabur',
-      penabur: 'penabur',
-      harvester: 'pemanen',
-      pemanen: 'pemanen',
-      trailer: 'pengangkut',
-      pengangkut: 'pengangkut',
-    };
-    const target = mapTool[toolInput] || 'bajak';
+  const actionEquip = useCallback(
+    async (toolInput: string, tractorIdx?: number) => {
+      const mapTool: Record<string, ImplementType> = {
+        none: 'kosong',
+        kosong: 'kosong',
+        plow: 'bajak',
+        bajak: 'bajak',
+        seeder: 'penabur',
+        penabur: 'penabur',
+        harvester: 'pemanen',
+        pemanen: 'pemanen',
+        trailer: 'pengangkut',
+        pengangkut: 'pengangkut',
+      };
+      const target = mapTool[toolInput] || 'bajak';
+      const cur = getTargetTractor(tractorIdx);
+      if (cur.implement === target) return;
 
-    if (tractorRef.current.implement === target) return;
+      soundFX.playEquip();
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        implement: target,
+        statusMessage: `equip("${TOOL_TO_EN[target]}")`,
+      }));
+      await sleepTick(200);
+    },
+    [getTargetTractor, updateTargetTractor]
+  );
 
-    soundFX.playEquip();
-    const nextTractor: TractorState = {
-      ...tractorRef.current,
-      implement: target,
-      statusMessage: `equip("${TOOL_TO_EN[target]}")`,
-    };
-    tractorRef.current = nextTractor;
-    setTractor(nextTractor);
-    await sleepTick(240);
-  }, []);
+  const actionPlow = useCallback(
+    async (tractorIdx?: number) => {
+      const cur = getTargetTractor(tractorIdx);
+      if (cur.implement !== 'bajak') {
+        await actionEquip('plow', tractorIdx);
+      }
 
-  const actionPlow = useCallback(async () => {
-    const cur = tractorRef.current;
-    if (cur.implement !== 'bajak') {
-      await actionEquip('plow');
-    }
+      const { x, z } = getTargetTractor(tractorIdx);
+      const tile = tilesRef.current[z][x];
 
-    const { x, z } = tractorRef.current;
-    const tile = tilesRef.current[z][x];
+      if (tile.terrain === 'pom_bensin' || tile.terrain === 'gudang') {
+        addLog('warn', `Tile (${x}, ${z}) cannot be plowed.`);
+        return;
+      }
 
-    if (tile.terrain === 'pom_bensin' || tile.terrain === 'gudang') {
-      addLog('warn', `Tile (${x}, ${z}) cannot be plowed.`);
-      return;
-    }
+      soundFX.playPlow();
+      const nextGrid = tilesRef.current.map((row) =>
+        row.map((t) =>
+          t.x === x && t.z === z
+            ? { ...t, soilState: 'dibajak' as const, crop: null, growth: 0 }
+            : t
+        )
+      );
+      tilesRef.current = nextGrid;
+      setTiles(nextGrid);
 
-    soundFX.playPlow();
-    const nextGrid = tilesRef.current.map((row) =>
-      row.map((t) =>
-        t.x === x && t.z === z
-          ? { ...t, soilState: 'dibajak' as const, crop: null, growth: 0 }
-          : t
-      )
-    );
-    tilesRef.current = nextGrid;
-    setTiles(nextGrid);
-
-    const updatedTractor = {
-      ...tractorRef.current,
-      fuel: Math.max(0, tractorRef.current.fuel - 1),
-      statusMessage: `plow() at (${x}, ${z})`,
-    };
-    tractorRef.current = updatedTractor;
-    setTractor(updatedTractor);
-    await sleepTick(280);
-  }, [actionEquip, addLog]);
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        fuel: Math.max(0, prev.fuel - 1),
+        statusMessage: `plow() at (${x}, ${z})`,
+      }));
+      await sleepTick(240);
+    },
+    [actionEquip, addLog, getTargetTractor, updateTargetTractor]
+  );
 
   const actionPlant = useCallback(
-    async (seedRaw: string = 'wheat') => {
-      const cur = tractorRef.current;
+    async (seedRaw: string = 'wheat', tractorIdx?: number) => {
+      const cur = getTargetTractor(tractorIdx);
       if (cur.implement !== 'penabur') {
-        await actionEquip('seeder');
+        await actionEquip('seeder', tractorIdx);
       }
 
       const seedMap: Record<string, CropType> = {
@@ -381,16 +419,22 @@ export default function App() {
 
       if ((crop === 'wortel' || crop === 'kayu') && !isNodeUnlocked('alat_wortel_kayu')) {
         soundFX.playError();
-        addLog('warn', `Seed "${seedRaw}" requires 'Bibit Wortel & Kayu' unlocked in Tech Tree (^).`);
+        addLog(
+          'warn',
+          `Seed "${seedRaw}" requires 'Bibit & Panen Wortel' unlocked in Tech Tree (^).`
+        );
         return;
       }
       if (crop === 'jagung' && !isNodeUnlocked('alat_jagung')) {
         soundFX.playError();
-        addLog('warn', `Seed "corn" requires 'Bibit Jagung Unggul' unlocked in Tech Tree (^).`);
+        addLog(
+          'warn',
+          `Seed "corn" requires 'Bibit & Panen Jagung' unlocked in Tech Tree (^).`
+        );
         return;
       }
 
-      const { x, z } = tractorRef.current;
+      const { x, z } = getTargetTractor(tractorIdx);
       const tile = tilesRef.current[z][x];
 
       if (tile.terrain === 'pom_bensin' || tile.terrain === 'gudang') {
@@ -409,175 +453,263 @@ export default function App() {
       tilesRef.current = nextGrid;
       setTiles(nextGrid);
 
-      const updatedTractor = {
-        ...tractorRef.current,
-        fuel: Math.max(0, tractorRef.current.fuel - 1),
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        fuel: Math.max(0, prev.fuel - 1),
         statusMessage: `plant("${seedRaw}") at (${x}, ${z})`,
-      };
-      tractorRef.current = updatedTractor;
-      setTractor(updatedTractor);
-      await sleepTick(280);
+      }));
+      await sleepTick(240);
     },
-    [actionEquip, addLog, isNodeUnlocked]
+    [actionEquip, addLog, getTargetTractor, isNodeUnlocked, updateTargetTractor]
   );
 
-  const actionHarvest = useCallback(async () => {
-    const cur = tractorRef.current;
-    if (cur.implement !== 'pemanen') {
-      await actionEquip('harvester');
-    }
+  const actionFertilize = useCallback(
+    async (tractorIdx?: number) => {
+      const { x, z } = getTargetTractor(tractorIdx);
+      const tile = tilesRef.current[z][x];
+      if (!tile.crop) {
+        addLog('info', `No crop to fertilize at (${x}, ${z}).`);
+        return;
+      }
 
-    const { x, z } = tractorRef.current;
-    const tile = tilesRef.current[z][x];
+      soundFX.playUnlock();
+      const nextGrid = tilesRef.current.map((row) =>
+        row.map((t) =>
+          t.x === x && t.z === z
+            ? { ...t, soilState: 'siap_panen' as const, growth: 1.0 }
+            : t
+        )
+      );
+      tilesRef.current = nextGrid;
+      setTiles(nextGrid);
 
-    if (tile.soilState !== 'siap_panen' || !tile.crop) {
-      addLog('info', `No ripe crop to harvest at (${x}, ${z}).`);
-      await sleepTick(180);
-      return;
-    }
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        statusMessage: `fertilize() at (${x}, ${z})`,
+      }));
+      addLog('action', `Fertilized crop at (${x}, ${z}) -> 100% Ready!`);
+      await sleepTick(200);
+    },
+    [addLog, getTargetTractor, updateTargetTractor]
+  );
 
-    const harvestedCrop = tile.crop;
-    soundFX.playHarvest();
+  const actionHarvest = useCallback(
+    async (tractorIdx?: number) => {
+      const cur = getTargetTractor(tractorIdx);
+      if (cur.implement !== 'pemanen') {
+        await actionEquip('harvester', tractorIdx);
+      }
 
-    const nextGrid = tilesRef.current.map((row) =>
-      row.map((t) =>
-        t.x === x && t.z === z
-          ? { ...t, soilState: 'liar' as const, crop: null, growth: 0 }
-          : t
-      )
-    );
-    tilesRef.current = nextGrid;
-    setTiles(nextGrid);
+      const { x, z } = getTargetTractor(tractorIdx);
+      const tile = tilesRef.current[z][x];
 
-    const currentCargoCount = getTotalCargo(tractorRef.current.cargo);
-    const canCarryMore = currentCargoCount < tractorRef.current.maxCargo;
+      if (tile.soilState !== 'siap_panen' || !tile.crop) {
+        addLog('info', `No ripe crop to harvest at (${x}, ${z}).`);
+        await sleepTick(160);
+        return;
+      }
 
-    // Calculate harvest yield bonus from upgrade level
-    let cropLevel = 1;
-    if (harvestedCrop === 'jerami') cropLevel = Math.max(1, getNodeLevel('logistik_dasar'));
-    else if (harvestedCrop === 'wortel') cropLevel = Math.max(1, getNodeLevel('alat_wortel_kayu'));
-    else if (harvestedCrop === 'kayu') cropLevel = Math.max(1, getNodeLevel('alat_pengangkut'));
-    else if (harvestedCrop === 'jagung') cropLevel = Math.max(1, getNodeLevel('alat_jagung'));
+      const harvestedCrop = tile.crop;
+      soundFX.playHarvest();
 
-    const barnYield = 1 + cropLevel;
+      const irrigationLv = getNodeLevel('logistik_irigasi');
+      const keepPlowed = irrigationLv > 0 && Math.random() < irrigationLv * 0.18;
 
-    const nextCargo = canCarryMore
-      ? {
-          ...tractorRef.current.cargo,
-          [harvestedCrop]: tractorRef.current.cargo[harvestedCrop] + 1,
-        }
-      : tractorRef.current.cargo;
+      const nextGrid = tilesRef.current.map((row) =>
+        row.map((t) =>
+          t.x === x && t.z === z
+            ? {
+                ...t,
+                soilState: keepPlowed ? ('dibajak' as const) : ('liar' as const),
+                crop: null,
+                growth: 0,
+              }
+            : t
+        )
+      );
+      tilesRef.current = nextGrid;
+      setTiles(nextGrid);
 
-    setWarehouse((prev) => ({
-      ...prev,
-      [harvestedCrop]: prev[harvestedCrop] + barnYield,
-    }));
+      // Calculate harvest yield bonus from upgrade level
+      let cropLevel = 1;
+      if (harvestedCrop === 'jerami') cropLevel = Math.max(1, getNodeLevel('logistik_dasar'));
+      else if (harvestedCrop === 'wortel') cropLevel = Math.max(1, getNodeLevel('alat_wortel_kayu'));
+      else if (harvestedCrop === 'kayu') cropLevel = Math.max(1, getNodeLevel('alat_pengangkut'));
+      else if (harvestedCrop === 'jagung') cropLevel = Math.max(1, getNodeLevel('alat_jagung'));
 
-    const updatedTractor: TractorState = {
-      ...tractorRef.current,
-      fuel: Math.max(0, tractorRef.current.fuel - 1),
-      cargo: nextCargo,
-      statusMessage: `harvest() at (${x}, ${z})`,
-    };
-    tractorRef.current = updatedTractor;
-    setTractor(updatedTractor);
+      const barnYield = 1 + cropLevel;
 
-    addLog('action', `Harvested at (${x}, ${z})! (+${barnYield} added to Barn)`);
-    await sleepTick(300);
-  }, [actionEquip, addLog, getNodeLevel]);
+      setWarehouse((prev) => ({
+        ...prev,
+        [harvestedCrop]: prev[harvestedCrop] + barnYield,
+      }));
+
+      updateTargetTractor(tractorIdx, (prev) => {
+        const currentCargoCount = getTotalCargo(prev.cargo);
+        const canCarryMore = currentCargoCount < prev.maxCargo;
+        const nextCargo = canCarryMore
+          ? { ...prev.cargo, [harvestedCrop]: prev.cargo[harvestedCrop] + 1 }
+          : prev.cargo;
+        return {
+          ...prev,
+          fuel: Math.max(0, prev.fuel - 1),
+          cargo: nextCargo,
+          statusMessage: `harvest() at (${x}, ${z})`,
+        };
+      });
+
+      addLog('action', `Harvested at (${x}, ${z})! (+${barnYield} added to Barn)`);
+      await sleepTick(260);
+    },
+    [actionEquip, addLog, getNodeLevel, getTargetTractor, updateTargetTractor]
+  );
 
   const actionGoToCoord = useCallback(
-    async (targetX: number, targetZ: number) => {
+    async (targetX: number, targetZ: number, tractorIdx?: number) => {
       const size = tilesRef.current.length;
       const tx = Math.max(0, Math.min(size - 1, Math.round(targetX)));
       const tz = Math.max(0, Math.min(size - 1, Math.round(targetZ)));
 
       let guard = 0;
-      while ((tractorRef.current.x !== tx || tractorRef.current.z !== tz) && guard < 24) {
+      while (guard < 60) {
         if (stopRequestedRef.current) return;
+        const cur = getTargetTractor(tractorIdx);
+        if (cur.x === tx && cur.z === tz) break;
         guard++;
-        const cx = tractorRef.current.x;
-        const cz = tractorRef.current.z;
 
-        if (cx < tx) {
-          if (tractorRef.current.direction !== 'timur') await actionTurn('east');
-          await actionMove(1);
-        } else if (cx > tx) {
-          if (tractorRef.current.direction !== 'barat') await actionTurn('west');
-          await actionMove(1);
-        } else if (cz < tz) {
-          if (tractorRef.current.direction !== 'selatan') await actionTurn('south');
-          await actionMove(1);
-        } else if (cz > tz) {
-          if (tractorRef.current.direction !== 'utara') await actionTurn('north');
-          await actionMove(1);
+        if (cur.x < tx) {
+          if (cur.direction !== 'timur') await actionTurn('east', tractorIdx);
+          await actionMove(1, tractorIdx);
+        } else if (cur.x > tx) {
+          if (cur.direction !== 'barat') await actionTurn('west', tractorIdx);
+          await actionMove(1, tractorIdx);
+        } else if (cur.z < tz) {
+          if (cur.direction !== 'selatan') await actionTurn('south', tractorIdx);
+          await actionMove(1, tractorIdx);
+        } else if (cur.z > tz) {
+          if (cur.direction !== 'utara') await actionTurn('north', tractorIdx);
+          await actionMove(1, tractorIdx);
         }
       }
     },
-    [actionTurn, actionMove]
+    [actionMove, actionTurn, getTargetTractor]
   );
 
-  const actionGoToFuel = useCallback(async () => {
-    await actionGoToCoord(0, 0);
-    await sleepTick(150);
-  }, [actionGoToCoord]);
+  const actionGoToFuel = useCallback(
+    async (tractorIdx?: number) => {
+      await actionGoToCoord(0, 0, tractorIdx);
+      await sleepTick(150);
+    },
+    [actionGoToCoord]
+  );
 
-  const actionGoToBarn = useCallback(async () => {
+  const actionGoToBarn = useCallback(
+    async (tractorIdx?: number) => {
+      const size = tilesRef.current.length;
+      await actionGoToCoord(size - 1, 0, tractorIdx);
+      await sleepTick(150);
+    },
+    [actionGoToCoord]
+  );
+
+  const actionRefuel = useCallback(
+    async (tractorIdx?: number) => {
+      const { x, z } = getTargetTractor(tractorIdx);
+      const tile = tilesRef.current[z][x];
+
+      if (tile.terrain !== 'pom_bensin') {
+        await actionGoToFuel(tractorIdx);
+      }
+
+      soundFX.playRefuel();
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        fuel: prev.maxFuel,
+        statusMessage: `refuel() -> ${prev.maxFuel}L`,
+      }));
+      addLog('action', 'Refueled tractor tank to 100%!');
+      await sleepTick(280);
+    },
+    [actionGoToFuel, addLog, getTargetTractor, updateTargetTractor]
+  );
+
+  const actionDeliver = useCallback(
+    async (tractorIdx?: number) => {
+      const { x, z } = getTargetTractor(tractorIdx);
+      const tile = tilesRef.current[z][x];
+      if (tile.terrain !== 'gudang') {
+        await actionGoToBarn(tractorIdx);
+      }
+
+      await actionEquip('trailer', tractorIdx);
+      const cur = getTargetTractor(tractorIdx);
+      const c = cur.cargo;
+      const total = getTotalCargo(c);
+
+      soundFX.playUnlock();
+      setWarehouse((prev) => ({
+        jerami: prev.jerami + c.jerami + (total === 0 ? 1 : 0),
+        kayu: prev.kayu + c.kayu,
+        wortel: prev.wortel + c.wortel,
+        jagung: prev.jagung + c.jagung,
+      }));
+
+      const emptyCargo: Inventory = { jerami: 0, kayu: 0, wortel: 0, jagung: 0 };
+      updateTargetTractor(tractorIdx, (prev) => ({
+        ...prev,
+        cargo: emptyCargo,
+        statusMessage: 'deliver() -> Barn',
+      }));
+      addLog('action', 'Cargo delivered to Barn!');
+      await sleepTick(260);
+    },
+    [actionEquip, actionGoToBarn, addLog, getTargetTractor, updateTargetTractor]
+  );
+
+  const actionStartHelper = useCallback(
+    async (helperIndex: number, seedRaw: string) => {
+      const fleetLevel = Math.max(1, getNodeLevel('alat_multi_traktor'));
+      if (helperIndex < 1 || helperIndex >= fleetLevel) {
+        addLog(
+          'warn',
+          `Tractor #${helperIndex + 1} is not unlocked yet. Upgrade 'Armada Multi-Traktor' in Tech Tree (^).`
+        );
+        return;
+      }
+
+      const seedMap: Record<string, CropType> = {
+        wheat: 'jerami',
+        carrot: 'wortel',
+        wood: 'kayu',
+        corn: 'jagung',
+      };
+      const preferredSeed: CropType = seedMap[seedRaw] || 'jerami';
+
+      const eIdx = helperIndex - 1;
+      const nextExtras = [...extraTractorsRef.current];
+      if (nextExtras[eIdx]) {
+        nextExtras[eIdx] = {
+          ...nextExtras[eIdx],
+          autoHelper: true,
+          preferredSeed,
+        };
+        extraTractorsRef.current = nextExtras;
+        setExtraTractors(nextExtras);
+        addLog('action', `Tractor #${helperIndex + 1} helper active (planting "${seedRaw}").`);
+      }
+    },
+    [addLog, getNodeLevel]
+  );
+
+  const actionClearField = useCallback(async () => {
     const size = tilesRef.current.length;
-    await actionGoToCoord(size - 1, 0);
-    await sleepTick(150);
-  }, [actionGoToCoord]);
-
-  const actionRefuel = useCallback(async () => {
-    const { x, z } = tractorRef.current;
-    const tile = tilesRef.current[z][x];
-
-    if (tile.terrain !== 'pom_bensin') {
-      await actionGoToFuel();
-    }
-
-    soundFX.playRefuel();
-    const updatedTractor: TractorState = {
-      ...tractorRef.current,
-      fuel: tractorRef.current.maxFuel,
-      statusMessage: `refuel() -> ${tractorRef.current.maxFuel}L`,
-    };
-    tractorRef.current = updatedTractor;
-    setTractor(updatedTractor);
-    addLog('action', `Refueled to ${updatedTractor.maxFuel}/${updatedTractor.maxFuel}L.`);
-    await sleepTick(320);
-  }, [actionGoToFuel, addLog]);
-
-  const actionDeliver = useCallback(async () => {
-    const { x, z } = tractorRef.current;
-    const tile = tilesRef.current[z][x];
-    if (tile.terrain !== 'gudang') {
-      await actionGoToBarn();
-    }
-
-    await actionEquip('trailer');
-    const c = tractorRef.current.cargo;
-    const total = getTotalCargo(c);
-
-    soundFX.playUnlock();
-    setWarehouse((prev) => ({
-      jerami: prev.jerami + c.jerami + (total === 0 ? 1 : 0),
-      kayu: prev.kayu + c.kayu,
-      wortel: prev.wortel + c.wortel,
-      jagung: prev.jagung + c.jagung,
-    }));
-
-    const emptyCargo: Inventory = { jerami: 0, kayu: 0, wortel: 0, jagung: 0 };
-    const updatedTractor: TractorState = {
-      ...tractorRef.current,
-      cargo: emptyCargo,
-      statusMessage: 'deliver() -> Barn',
-    };
-    tractorRef.current = updatedTractor;
-    setTractor(updatedTractor);
-    addLog('action', 'Cargo delivered to Barn!');
-    await sleepTick(300);
-  }, [actionGoToBarn, actionEquip, addLog]);
+    const irLv = getNodeLevel('logistik_irigasi');
+    const cleared = createInitialGrid(size, irLv);
+    tilesRef.current = cleared;
+    setTiles(cleared);
+    addLog('info', 'Field reset with clear().');
+    await sleepTick(200);
+  }, [addLog, getNodeLevel]);
 
   // Execute Python Code
   const startPythonExecution = useCallback(
@@ -609,19 +741,23 @@ export default function App() {
       addLog('info', `Running '${activeTab.name}'...`);
 
       const interpreter = new AgroPythonInterpreter({
-        getTractorState: () => ({
-          x: tractorRef.current.x,
-          z: tractorRef.current.z,
-          direction: tractorRef.current.direction,
-          fuel: tractorRef.current.fuel,
-          max_fuel: tractorRef.current.maxFuel,
-          tool: tractorRef.current.implement,
-          cargo: getTotalCargo(tractorRef.current.cargo),
-          max_cargo: tractorRef.current.maxCargo,
-        }),
+        getTractorState: (idx) => {
+          const t = getTargetTractor(idx);
+          return {
+            x: t.x,
+            z: t.z,
+            direction: t.direction,
+            fuel: t.fuel,
+            max_fuel: t.maxFuel,
+            tool: t.implement,
+            cargo: getTotalCargo(t.cargo),
+            max_cargo: t.maxCargo,
+          };
+        },
+        getTractorCount: () => 1 + extraTractorsRef.current.length,
         getWorldSize: () => tilesRef.current.length,
-        checkSoil: () => {
-          const { x, z } = tractorRef.current;
+        checkSoil: (idx) => {
+          const { x, z } = getTargetTractor(idx);
           const t = tilesRef.current[z][x];
           if (t.terrain === 'lumpur') return 'mud';
           if (t.terrain === 'pom_bensin') return 'fuel_station';
@@ -631,12 +767,28 @@ export default function App() {
           if (t.soilState === 'ditanam') return 'planted';
           return 'ready';
         },
-        canHarvest: () => {
-          const { x, z } = tractorRef.current;
+        canHarvest: (idx) => {
+          const { x, z } = getTargetTractor(idx);
           const t = tilesRef.current[z][x];
           return t.soilState === 'siap_panen';
         },
+        measureCrop: (idx) => {
+          const { x, z } = getTargetTractor(idx);
+          const t = tilesRef.current[z][x];
+          return Math.round((t.growth || 0) * 100);
+        },
+        getElapsedTime: () => Math.round((Date.now() - startTimeRef.current) / 100) / 10,
         isNodeUnlocked,
+        setActiveTractorIndex: (idx) => {
+          activeTractorIdxRef.current = Math.max(0, Math.min(3, idx));
+        },
+        setSimSpeed: (spd) => {
+          speedRef.current = spd;
+          setExecutionSpeed(spd);
+        },
+        startHelper: actionStartHelper,
+        fertilize: actionFertilize,
+        clearField: actionClearField,
         move: actionMove,
         turn: actionTurn,
         equip: actionEquip,
@@ -686,8 +838,10 @@ export default function App() {
     },
     [
       activeScriptId,
+      actionClearField,
       actionDeliver,
       actionEquip,
+      actionFertilize,
       actionGoToBarn,
       actionGoToCoord,
       actionGoToFuel,
@@ -696,8 +850,10 @@ export default function App() {
       actionPlant,
       actionPlow,
       actionRefuel,
+      actionStartHelper,
       actionTurn,
       addLog,
+      getTargetTractor,
       isNodeUnlocked,
       isRunningCode,
       scripts,
@@ -717,7 +873,7 @@ export default function App() {
     addLog('warn', 'Execution stopped.');
   }, [addLog]);
 
-  // Unlock or Upgrade Tech Tree Node Handler (Supports multi-level 0/10 -> 1/10 -> ... -> 10/10)
+  // Unlock or Upgrade Tech Tree Node Handler
   const handleUnlockTechNode = (nodeId: string) => {
     const node = techNodes.find((n) => n.id === nodeId);
     if (!node || node.level >= node.maxLevel) return;
@@ -744,15 +900,49 @@ export default function App() {
       )
     );
 
-    if (nodeId === 'alat_pengangkut') {
+    if (nodeId === 'alat_multi_traktor') {
+      // Spawn new 3D tractor on the island!
+      const size = tilesRef.current.length;
+      const newIdx = nextLevel - 1;
+      const spawnCoords = [
+        { x: Math.min(size - 1, 2), z: Math.min(size - 1, 2) },
+        { x: 0, z: Math.min(size - 1, 2) },
+        { x: Math.min(size - 1, 3), z: Math.min(size - 1, 1) },
+      ];
+      const pos = spawnCoords[newIdx - 1] || { x: 1, z: 1 };
+      const newHelper: TractorState = {
+        id: newIdx,
+        x: pos.x,
+        z: pos.z,
+        direction: 'selatan',
+        fuel: tractorRef.current.maxFuel,
+        maxFuel: tractorRef.current.maxFuel,
+        implement: 'pemanen',
+        cargo: { jerami: 0, kayu: 0, wortel: 0, jagung: 0 },
+        maxCargo: tractorRef.current.maxCargo,
+        isMoving: false,
+        statusMessage: `Tractor #${nextLevel} Ready (Control via Python code)`,
+        autoHelper: false,
+      };
+      const updatedExtras = [...extraTractorsRef.current, newHelper];
+      extraTractorsRef.current = updatedExtras;
+      setExtraTractors(updatedExtras);
+    } else if (nodeId === 'alat_pengangkut') {
       setTractor((t) => ({ ...t, maxCargo: 10 + nextLevel * 5 }));
     } else if (nodeId === 'alat_tangki_besar') {
       const newMaxFuel = 100 + nextLevel * 50;
       setTractor((t) => ({ ...t, maxFuel: newMaxFuel, fuel: newMaxFuel }));
+    } else if (nodeId === 'logistik_irigasi') {
+      // Convert mud tiles into fertile soil
+      const nextGrid = tilesRef.current.map((row) =>
+        row.map((t) => (t.terrain === 'lumpur' ? { ...t, terrain: 'tanah' as const } : t))
+      );
+      tilesRef.current = nextGrid;
+      setTiles(nextGrid);
     } else if (nodeId === 'logistik_ekspansi') {
       const newSize = getIslandSizeForLevel(nextLevel);
-      const nextGrid = createInitialGrid(newSize);
-      // Preserve existing crops/soil states on interior tiles when expanding the island
+      const irLv = getNodeLevel('logistik_irigasi');
+      const nextGrid = createInitialGrid(newSize, irLv);
       const oldGrid = tilesRef.current;
       const oldSize = oldGrid.length;
       for (let z = 0; z < Math.min(oldSize, newSize); z++) {
@@ -782,7 +972,7 @@ export default function App() {
     }
   };
 
-  // Keyboard Shortcuts (Title Screen Enter/Space & Esc Pause/Close Modal)
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -820,13 +1010,15 @@ export default function App() {
   }, [isAiModalOpen, isDocsModalOpen, isTechModalOpen, screen]);
 
   const activeScript = scripts.find((s) => s.id === activeScriptId) || scripts[0];
+  const totalTractorsCount = 1 + extraTractors.length;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none">
-      {/* 1. Full-Viewport 3D Floating Sky Island & Composite Tractor Scene */}
+      {/* 1. Full-Viewport 3D Floating Sky Island & Multi-Tractor Scene */}
       <FarmViewport3D
         tiles={tiles}
         tractor={tractor}
+        extraTractors={extraTractors}
         isTitleScreen={screen === 'title'}
         selectedTile={selectedTile}
         onSelectTile={(coord) => setSelectedTile(coord)}
@@ -841,9 +1033,9 @@ export default function App() {
 
           <div className="flex flex-col items-center text-center max-w-xl my-auto">
             <svg
-              viewBox="0 0 520 110"
-              className="w-full max-w-[460px] h-auto drop-shadow-lg"
-              aria-label="AgroCode"
+              viewBox="0 0 540 110"
+              className="w-full max-w-[480px] h-auto drop-shadow-lg"
+              aria-label="этаTractor"
             >
               <rect
                 x="14"
@@ -867,10 +1059,10 @@ export default function App() {
                 fill="#FFFFFF"
                 fontFamily="Outfit, sans-serif"
                 fontWeight="700"
-                fontSize="58"
-                letterSpacing="2"
+                fontSize="56"
+                letterSpacing="1.5"
               >
-                AGROCODE
+                этаTractor
               </text>
               <text
                 x="112"
@@ -886,7 +1078,7 @@ export default function App() {
             </svg>
 
             <p className="mt-4 text-sm text-[#EAEEF2] leading-relaxed max-w-md">
-              Tulis kode Python untuk mengendalikan traktor di atas pulau ladang melayang, memanen komoditas, dan membuka Pohon Teknologi.
+              Tulis kode Python untuk mengendalikan armada traktor di atas pulau ladang melayang, memanen komoditas, dan membuka Pohon Teknologi.
             </p>
 
             <button
@@ -903,43 +1095,97 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. ACTIVE GAMEPLAY HUD */}
+      {/* 3. ACTIVE GAMEPLAY HUD (With Tech Tree Icons as requested in Screenshot_2026-10-25_000057) */}
       {screen !== 'title' && (
         <div className="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between p-3.5">
           <div className="flex items-start justify-between gap-3">
-            {/* Top-Left: Compact Tractor Fuel, Tool & Barn Resources */}
-            <div className="pointer-events-auto flex flex-col gap-1.5 bg-[#232527]/95 border border-[#4E5358] rounded-md px-3.5 py-2.5 shadow-lg">
-              <div className="flex items-center gap-3 text-xs font-mono-code">
-                <span className="font-display font-bold text-white tracking-tight text-sm">
-                  AGROCODE
+            {/* Top-Left: Transparent Tractor Telemetry & Barn Inventory with Tech Tree Icons */}
+            <div className="pointer-events-auto flex flex-col gap-1.5 bg-transparent px-1 py-0.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
+              {/* Row 1: AGROCODE + Fuel + Tool + Cargo + Multi-Tractor Count with Tech Tree Icons */}
+              <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono-code">
+                <span className="inline-flex items-center gap-1.5 font-display font-bold text-white tracking-tight text-sm">
+                  {renderNodeCenterVisual('tractor_speed', '', 'w-5 h-5')}
+                  <span>этаTractor</span>
                 </span>
-                <span className="text-[#8B929A]">·</span>
+
+                <span className="text-white/75">·</span>
+
                 <span
-                  className={
-                    tractor.fuel < 25 ? 'text-[#FF7B72] font-bold' : 'text-[#E5A93C] font-semibold'
-                  }
+                  className={`inline-flex items-center gap-1 ${
+                    tractor.fuel < 25 ? 'text-[#FF7B72] font-bold' : 'text-[#FFD166] font-semibold'
+                  }`}
                 >
-                  fuel: {Math.round(tractor.fuel)}/{tractor.maxFuel}L
+                  {renderNodeCenterVisual('fuel_tank', '', 'w-5 h-5')}
+                  <span>
+                    fuel: {Math.round(tractor.fuel)}/{tractor.maxFuel}L
+                  </span>
                 </span>
-                <span className="text-[#8B929A]">·</span>
-                <span className="text-[#A8E040]">
-                  tool: "{TOOL_TO_EN[tractor.implement]}"
+
+                <span className="text-white/75">·</span>
+
+                <span className="inline-flex items-center gap-1 text-[#B8F252] font-semibold">
+                  {renderNodeCenterVisual('autopilot', '', 'w-5 h-5')}
+                  <span>tool: "{TOOL_TO_EN[tractor.implement]}"</span>
                 </span>
-                <span className="text-[#8B929A]">·</span>
-                <span className="text-[#D0D6DC]">
-                  cargo: {getTotalCargo(tractor.cargo)}/{tractor.maxCargo}
+
+                <span className="text-white/75">·</span>
+
+                <span className="inline-flex items-center gap-1 text-white font-semibold">
+                  {renderNodeCenterVisual('wood_tree', '', 'w-5 h-5')}
+                  <span>
+                    cargo: {getTotalCargo(tractor.cargo)}/{tractor.maxCargo}
+                  </span>
                 </span>
+
+                {totalTractorsCount > 1 && (
+                  <>
+                    <span className="text-white/75">·</span>
+                    <span className="inline-flex items-center gap-1 text-[#7CE8FF] font-semibold">
+                      {renderNodeCenterVisual('multi_tractor', '', 'w-5 h-5')}
+                      <span>tractors: {totalTractorsCount}</span>
+                    </span>
+                  </>
+                )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs font-mono-code text-[#D8DEE4] pt-1 border-t border-[#383C40]">
-                <span className="text-[#9DA5AE]">Barn:</span>
-                <span>Wheat {warehouse.jerami}</span>
-                <span aria-hidden="true">·</span>
-                <span>Carrot {warehouse.wortel}</span>
-                <span aria-hidden="true">·</span>
-                <span>Wood {warehouse.kayu}</span>
-                <span aria-hidden="true">·</span>
-                <span>Corn {warehouse.jagung}</span>
+              {/* Row 2: Barn Commodities with 3D Isometric Tech Tree Icons (Transparent, No Box) */}
+              <div className="flex flex-wrap items-center gap-3 text-xs font-mono-code text-white font-semibold">
+                <span className="inline-flex items-center gap-1 text-[#E2E8F0]">
+                  {renderNodeCenterVisual('grid_expand', '', 'w-4 h-4')}
+                  <span>Barn:</span>
+                </span>
+
+                <span className="inline-flex items-center gap-1.5">
+                  {renderResourceIcon('jerami', 'w-5 h-5')}
+                  <span>Wheat {warehouse.jerami}</span>
+                </span>
+
+                <span className="text-white/70" aria-hidden="true">
+                  ·
+                </span>
+
+                <span className="inline-flex items-center gap-1.5">
+                  {renderResourceIcon('wortel', 'w-5 h-5')}
+                  <span>Carrot {warehouse.wortel}</span>
+                </span>
+
+                <span className="text-white/70" aria-hidden="true">
+                  ·
+                </span>
+
+                <span className="inline-flex items-center gap-1.5">
+                  {renderResourceIcon('kayu', 'w-5 h-5')}
+                  <span>Wood {warehouse.kayu}</span>
+                </span>
+
+                <span className="text-white/70" aria-hidden="true">
+                  ·
+                </span>
+
+                <span className="inline-flex items-center gap-1.5">
+                  {renderResourceIcon('jagung', 'w-5 h-5')}
+                  <span>Corn {warehouse.jagung}</span>
+                </span>
               </div>
             </div>
 
@@ -1008,18 +1254,25 @@ export default function App() {
               prev.map((s) => (s.id === activeScript.id ? { ...s, code: newCode } : s))
             )
           }
-          onAddScript={() => {
+          onAddScript={(customName) => {
             const nextNum = scripts.length + 1;
-            const newId = `script_${nextNum}`;
+            const newId = `script_${Date.now()}`;
+            const defaultName = customName || `script_${nextNum}`;
             setScripts((prev) => [
               ...prev,
               {
                 id: newId,
-                name: newId,
-                code: `# ${newId}\nmove(1)\n`,
+                name: defaultName,
+                code: `# ${defaultName}\nmove(1)\n`,
               },
             ]);
             setActiveScriptId(newId);
+            return newId;
+          }}
+          onRenameScript={(id, newName) => {
+            setScripts((prev) =>
+              prev.map((s) => (s.id === id ? { ...s, name: newName } : s))
+            );
           }}
           isRunning={isRunningCode}
           isStepWaiting={isStepMode}
@@ -1040,7 +1293,7 @@ export default function App() {
           <div className="w-full max-w-sm rounded-lg border border-[#52565A] bg-[#232527] p-6 text-center space-y-4 shadow-2xl">
             <h2 className="text-xl font-display font-bold text-white">Permainan Dijeda</h2>
             <p className="text-xs text-[#B8BFC6] font-mono-code">
-              pos=({tractor.x}, {tractor.z}) · fuel={Math.round(tractor.fuel)}/{tractor.maxFuel}L
+              pos=({tractor.x}, {tractor.z}) · fuel={Math.round(tractor.fuel)}/{tractor.maxFuel}L · tractors={totalTractorsCount}
             </p>
             <div className="flex flex-col gap-2.5 pt-2">
               <button
@@ -1054,7 +1307,8 @@ export default function App() {
                   stopPythonExecution();
                   const expandLv =
                     techNodes.find((n) => n.id === 'logistik_ekspansi')?.level ?? 0;
-                  const resetGrid = createInitialGrid(getIslandSizeForLevel(expandLv));
+                  const irLv = getNodeLevel('logistik_irigasi');
+                  const resetGrid = createInitialGrid(getIslandSizeForLevel(expandLv), irLv);
                   tilesRef.current = resetGrid;
                   setTiles(resetGrid);
                   setTractor((t) => ({

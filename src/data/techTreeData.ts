@@ -2,13 +2,11 @@ import { TechNode, TechCost, ScriptTab } from '../types/game';
 
 /**
  * Computes the resource cost required to upgrade a node from `node.level` to `node.level + 1`.
- * For single-level nodes (maxLevel === 1), returns the base cost.
- * For multi-level nodes (maxLevel > 1), scales cost smoothly with current level.
  */
 export function getUpgradeCostsForNode(node: TechNode): TechCost[] {
   if (node.level >= node.maxLevel) return [];
   if (node.maxLevel === 1) return node.costs;
-  const multiplier = node.level === 0 ? 1 : 1 + Math.floor(node.level * 0.6);
+  const multiplier = node.level === 0 ? 1 : 1 + Math.floor(node.level * 0.65);
   return node.costs.map((c) => ({
     resource: c.resource,
     amount: Math.max(1, Math.round(c.amount * multiplier)),
@@ -16,21 +14,25 @@ export function getUpgradeCostsForNode(node: TechNode): TechCost[] {
 }
 
 /**
- * Maps Island Expansion level (0..10) to grid dimension N (NxN).
- * Level 0/10 -> 4x4
- * Level 1/10 -> 6x6 (as requested by user: "upgrade pulau nya jadi 1/10 atau level 1 pulau nya 6x6 dan seterus nya")
- * Level 2/10 -> 7x7
- * Level 3/10 -> 8x8
+ * Maps Island Expansion level (0..12) to grid dimension N (NxN).
+ * Each upgrade level adds +2 to both width and length for much larger island expansion!
+ * Level 0/12 -> 4x4 (16 tiles)
+ * Level 1/12 -> 6x6 (36 tiles)
+ * Level 2/12 -> 8x8 (64 tiles)
+ * Level 3/12 -> 10x10 (100 tiles)
+ * Level 4/12 -> 12x12 (144 tiles)
+ * Level 5/12 -> 14x14 (196 tiles)
+ * Level 6/12 -> 16x16 (256 tiles)
  * ...
- * Level 10/10 -> 15x15
+ * Level 12/12 -> 28x28 (784 tiles)
  */
 export function getIslandSizeForLevel(level: number): number {
   if (level <= 0) return 4;
-  return 5 + level; // level 1 => 6x6, level 2 => 7x7, ..., level 10 => 15x15
+  return 4 + level * 2;
 }
 
 export const INITIAL_TECH_NODES: TechNode[] = [
-  // ROW 0 (Root Node at Top Center — 'while' syntax unlock, maxLevel = 1)
+  // ================= ROW 0 (Root Node at Top Center: 'while') =================
   {
     id: 'kode_while',
     branch: 'kode',
@@ -43,17 +45,37 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     level: 0,
     maxLevel: 1,
     costs: [{ resource: 'jerami', amount: 4 }],
-    treeX: 480,
-    treeY: 50,
+    treeX: 540,
+    treeY: 40,
   },
 
-  // ROW 1 (Tractor Speed 1/5, Wheat Yield 1/10, Basic Python API)
+  // ================= ROW 1 (Multi-Tractor Fleet 1/4, Tractor Speed 1/5, Wheat Yield 1/10, Basic API) =================
+  {
+    id: 'alat_multi_traktor',
+    branch: 'alat',
+    title: 'Armada Multi-Traktor',
+    subtitle: 'Upgrade Level (1/4 -> 4/4 Traktor)',
+    description:
+      'Menambah jumlah objek traktor 3D di pulau ladang (hingga 4 traktor). Setiap traktor dikendalikan lewat kode Python menggunakan use_tractor(i) atau tractors[i].move(1).',
+    syntaxBadge: 'use_tractor(i)',
+    visualKind: 'multi_tractor',
+    unlocked: true,
+    level: 1,
+    maxLevel: 4,
+    costs: [
+      { resource: 'jerami', amount: 8 },
+      { resource: 'kayu', amount: 4 },
+    ],
+    prerequisiteId: 'kode_while',
+    treeX: 350,
+    treeY: 165,
+  },
   {
     id: 'alat_dasar',
     branch: 'alat',
     title: 'Kecepatan & Alat Traktor',
     subtitle: 'Upgrade Level (1/5 -> 5/5)',
-    description: 'Meningkatkan kecepatan gerak dan kerja alat tempel traktor (+25% kecepatan per level).',
+    description: 'Meningkatkan kecepatan gerak dan kerja seluruh traktor (+25% kecepatan per level).',
     syntaxBadge: 'plow() · harvest()',
     visualKind: 'tractor_speed',
     unlocked: true,
@@ -61,8 +83,8 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     maxLevel: 5,
     costs: [{ resource: 'jerami', amount: 4 }],
     prerequisiteId: 'kode_while',
-    treeX: 340,
-    treeY: 175,
+    treeX: 480,
+    treeY: 165,
   },
   {
     id: 'logistik_dasar',
@@ -77,8 +99,8 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     maxLevel: 10,
     costs: [{ resource: 'jerami', amount: 4 }],
     prerequisiteId: 'kode_while',
-    treeX: 480,
-    treeY: 175,
+    treeX: 610,
+    treeY: 165,
   },
   {
     id: 'kode_dasar',
@@ -93,26 +115,27 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     maxLevel: 1,
     costs: [],
     prerequisiteId: 'kode_while',
-    treeX: 620,
-    treeY: 175,
+    treeX: 740,
+    treeY: 165,
   },
 
-  // ROW 2 (Ekspansi Pulau 0/10, Navigasi Rute Pintar, Conditional Logic if/else)
+  // ================= ROW 2 (Ekspansi Pulau Besar 0/12, Autopilot Navigation, Conditional Logic if/else) =================
   {
     id: 'logistik_ekspansi',
     branch: 'logistik',
     title: 'Ekspansi Pulau Ladang',
-    subtitle: 'Upgrade Level (0/10 -> 10/10)',
-    description: 'Memperluas ukuran pulau ladang melayang: Lv.0 (4x4), Lv.1 (6x6), Lv.2 (7x7), Lv.3 (8x8) hingga Lv.10 (15x15).',
+    subtitle: 'Upgrade Level (0/12 -> 12/12)',
+    description:
+      'Memperluas ukuran pulau ladang melayang (+2x2 tiap level): Lv.0 (4x4), Lv.1 (6x6), Lv.2 (8x8), Lv.3 (10x10), Lv.4 (12x12) hingga Lv.12 (28x28)!',
     syntaxBadge: 'get_world_size()',
     visualKind: 'grid_expand',
     unlocked: false,
     level: 0,
-    maxLevel: 10,
+    maxLevel: 12,
     costs: [{ resource: 'jerami', amount: 6 }],
-    prerequisiteId: 'logistik_dasar',
-    treeX: 360,
-    treeY: 310,
+    prerequisiteId: 'alat_dasar',
+    treeX: 415,
+    treeY: 295,
   },
   {
     id: 'logistik_autopilot',
@@ -126,9 +149,9 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     level: 0,
     maxLevel: 1,
     costs: [{ resource: 'jerami', amount: 5 }],
-    prerequisiteId: 'logistik_dasar',
-    treeX: 480,
-    treeY: 310,
+    prerequisiteId: 'alat_dasar',
+    treeX: 545,
+    treeY: 295,
   },
   {
     id: 'kode_if',
@@ -142,65 +165,63 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     level: 0,
     maxLevel: 1,
     costs: [{ resource: 'jerami', amount: 5 }],
-    prerequisiteId: 'logistik_dasar',
-    treeX: 620,
-    treeY: 310,
+    prerequisiteId: 'kode_dasar',
+    treeX: 740,
+    treeY: 295,
   },
 
-  // ROW 3 (Carrot Mastery 0/10, print(), For Loop)
+  // ================= ROW 3 (Carrot Mastery 0/10, print(), Operators 1 + 1) =================
   {
     id: 'alat_wortel_kayu',
     branch: 'alat',
     title: 'Bibit & Panen Wortel',
     subtitle: 'Upgrade Level (0/10 -> 10/10)',
-    description: 'Lv.1 membuka bibit Wortel ("carrot") & Kayu ("wood"). Upgrade level berikutnya menambah hasil panen Wortel +1 per level.',
+    description:
+      'Lv.1 membuka bibit Wortel ("carrot") & Kayu ("wood"). Upgrade level berikutnya menambah hasil panen Wortel +1 per level.',
     syntaxBadge: 'plant("carrot")',
     visualKind: 'carrot',
     unlocked: false,
     level: 0,
     maxLevel: 10,
     costs: [{ resource: 'jerami', amount: 6 }],
-    prerequisiteId: 'logistik_ekspansi',
-    treeX: 330,
-    treeY: 445,
+    prerequisiteId: 'logistik_autopilot',
+    treeX: 350,
+    treeY: 425,
   },
   {
     id: 'kode_print',
     branch: 'kode',
     title: 'Console Output',
     subtitle: 'print() & status()',
-    description: 'Mencetak hasil sensor check_soil() dan status traktor ke konsol editor.',
+    description: 'Mencetak hasil sensor check_soil(), measure(), dan status traktor ke konsol editor.',
     syntaxBadge: 'print()',
     visualKind: 'code',
     unlocked: false,
     level: 0,
     maxLevel: 1,
-    costs: [{ resource: 'wortel', amount: 4 }],
-    prerequisiteId: 'kode_if',
+    costs: [{ resource: 'jerami', amount: 6 }],
+    prerequisiteId: 'logistik_autopilot',
     treeX: 545,
-    treeY: 445,
+    treeY: 425,
   },
   {
-    id: 'kode_for',
+    id: 'kode_operator',
     branch: 'kode',
-    title: 'For Loop & Range',
-    subtitle: 'for i in range(n):',
-    description: 'Mengulangi perintah secara terukur menggunakan for loop dan fungsi range().',
-    syntaxBadge: 'for i in range():',
+    title: 'Operators & Arithmetic',
+    subtitle: '1 + 1 · % · and · or',
+    description: 'Membuka ekspresi matematika (+, -, *, //, %) dan operator logika gabungan (and, or, not).',
+    syntaxBadge: '1 + 1',
     visualKind: 'code',
     unlocked: false,
     level: 0,
     maxLevel: 1,
-    costs: [
-      { resource: 'jerami', amount: 6 },
-      { resource: 'wortel', amount: 4 },
-    ],
+    costs: [{ resource: 'jerami', amount: 6 }],
     prerequisiteId: 'kode_if',
-    treeX: 730,
-    treeY: 445,
+    treeX: 790,
+    treeY: 425,
   },
 
-  // ROW 4 (Fuel Tank 0/8, Wood & Cargo Mastery 0/10)
+  // ================= ROW 4 (Fuel Tank 0/8, Wood & Cargo 0/10, set_speed(), get_time(), (x,y), a = 2) =================
   {
     id: 'alat_tangki_besar',
     branch: 'alat',
@@ -217,8 +238,8 @@ export const INITIAL_TECH_NODES: TechNode[] = [
       { resource: 'kayu', amount: 3 },
     ],
     prerequisiteId: 'alat_wortel_kayu',
-    treeX: 250,
-    treeY: 580,
+    treeX: 255,
+    treeY: 560,
   },
   {
     id: 'alat_pengangkut',
@@ -237,10 +258,100 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     ],
     prerequisiteId: 'alat_wortel_kayu',
     treeX: 395,
-    treeY: 580,
+    treeY: 560,
+  },
+  {
+    id: 'kode_speed_time',
+    branch: 'kode',
+    title: 'Speed Control API',
+    subtitle: 'set_speed(multiplier)',
+    description: 'Mengatur kecepatan simulasi traktor langsung dari skrip Python menggunakan set_speed(1..5).',
+    syntaxBadge: 'set_speed()',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [{ resource: 'wortel', amount: 5 }],
+    prerequisiteId: 'kode_print',
+    treeX: 505,
+    treeY: 560,
+  },
+  {
+    id: 'kode_get_time',
+    branch: 'kode',
+    title: 'Time & Crop Sensor',
+    subtitle: 'get_time() & measure()',
+    description: 'Membaca waktu jalannya simulasi dengan get_time() dan persentase tumbuh tanaman (0..100) dengan measure().',
+    syntaxBadge: 'get_time()',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [{ resource: 'wortel', amount: 5 }],
+    prerequisiteId: 'kode_print',
+    treeX: 620,
+    treeY: 560,
+  },
+  {
+    id: 'kode_tuple_coord',
+    branch: 'kode',
+    title: 'Coordinates & Goto',
+    subtitle: '(x, y) · goto(x, z)',
+    description: 'Membaca koordinat get_pos_x(), get_pos_y() serta berpindah langsung ke petak target menggunakan goto(x, z).',
+    syntaxBadge: '(x,y)',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [
+      { resource: 'jerami', amount: 6 },
+      { resource: 'wortel', amount: 4 },
+    ],
+    prerequisiteId: 'kode_operator',
+    treeX: 735,
+    treeY: 560,
+  },
+  {
+    id: 'kode_variabel',
+    branch: 'kode',
+    title: 'Variables & Assignment',
+    subtitle: 'a = 2 · a += 1',
+    description: 'Menyimpan angka, teks, atau koordinat ke dalam variabel Python serta mendukung +=, -=, dan *=.',
+    syntaxBadge: 'a = 2',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [
+      { resource: 'jerami', amount: 6 },
+      { resource: 'wortel', amount: 4 },
+    ],
+    prerequisiteId: 'kode_operator',
+    treeX: 850,
+    treeY: 560,
   },
 
-  // ROW 5 (Corn Mastery 0/10, Python Lists, Python Functions def)
+  // ================= ROW 5 (Pupuk Organik 0/8, Corn Mastery 0/10, for loop, [1,2,3], def f():) =================
+  {
+    id: 'alat_pupuk',
+    branch: 'alat',
+    title: 'Pupuk Instan & Kesuburan',
+    subtitle: 'Upgrade Level (0/8 -> 8/8)',
+    description:
+      'Membuka fungsi fertilize() agar tanaman langsung matang seketika dan mempercepat tumbuh alami seluruh tanaman +20% per level.',
+    syntaxBadge: 'fertilize()',
+    visualKind: 'fertilizer',
+    unlocked: false,
+    level: 0,
+    maxLevel: 8,
+    costs: [
+      { resource: 'wortel', amount: 6 },
+      { resource: 'kayu', amount: 4 },
+    ],
+    prerequisiteId: 'alat_tangki_besar',
+    treeX: 255,
+    treeY: 695,
+  },
   {
     id: 'alat_jagung',
     branch: 'alat',
@@ -258,7 +369,26 @@ export const INITIAL_TECH_NODES: TechNode[] = [
     ],
     prerequisiteId: 'alat_pengangkut',
     treeX: 395,
-    treeY: 715,
+    treeY: 695,
+  },
+  {
+    id: 'kode_for',
+    branch: 'kode',
+    title: 'For Loop & Range',
+    subtitle: 'for i in range(n):',
+    description: 'Mengulangi perintah secara terukur menggunakan for loop dan fungsi range().',
+    syntaxBadge: 'for i in range():',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [
+      { resource: 'wortel', amount: 6 },
+      { resource: 'kayu', amount: 4 },
+    ],
+    prerequisiteId: 'kode_get_time',
+    treeX: 620,
+    treeY: 695,
   },
   {
     id: 'kode_list',
@@ -275,18 +405,60 @@ export const INITIAL_TECH_NODES: TechNode[] = [
       { resource: 'wortel', amount: 6 },
       { resource: 'kayu', amount: 4 },
     ],
-    prerequisiteId: 'kode_for',
-    treeX: 660,
-    treeY: 580,
+    prerequisiteId: 'kode_variabel',
+    treeX: 735,
+    treeY: 695,
   },
   {
     id: 'kode_def',
     branch: 'kode',
     title: 'Custom Functions',
     subtitle: 'def work_tile():',
-    description: 'Mendefinisikan fungsi Python sendiri dengan kata kunci def.',
+    description: 'Mendefinisikan fungsi Python sendiri dengan kata kunci def dan parameter.',
     syntaxBadge: 'def f():',
     visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [
+      { resource: 'kayu', amount: 6 },
+      { resource: 'wortel', amount: 6 },
+    ],
+    prerequisiteId: 'kode_variabel',
+    treeX: 850,
+    treeY: 695,
+  },
+
+  // ================= ROW 6 (Irigasi & Reklamasi Lumpur 0/6, Fleet API, Dict {1:2}, import random) =================
+  {
+    id: 'logistik_irigasi',
+    branch: 'logistik',
+    title: 'Irigasi & Reklamasi Tanah',
+    subtitle: 'Upgrade Level (0/6 -> 6/6)',
+    description:
+      'Mengubah petak lumpur menjadi tanah subur serta memberi peluang tanah tetap terbajak otomatis seusai dipanen.',
+    syntaxBadge: 'auto_plow',
+    visualKind: 'irrigation',
+    unlocked: false,
+    level: 0,
+    maxLevel: 6,
+    costs: [
+      { resource: 'kayu', amount: 6 },
+      { resource: 'jagung', amount: 4 },
+    ],
+    prerequisiteId: 'alat_pupuk',
+    treeX: 255,
+    treeY: 830,
+  },
+  {
+    id: 'kode_fleet_api',
+    branch: 'kode',
+    title: 'Multi-Tractor Python API',
+    subtitle: 'tractors[i] & use_tractor(i)',
+    description:
+      'Mengendalikan setiap unit traktor secara spesifik dari kode Python: use_tractor(1), tractors[1].move(1), num_tractors(), dan clear().',
+    syntaxBadge: 'tractors[i]',
+    visualKind: 'trophy',
     unlocked: false,
     level: 0,
     maxLevel: 1,
@@ -295,17 +467,34 @@ export const INITIAL_TECH_NODES: TechNode[] = [
       { resource: 'jagung', amount: 4 },
     ],
     prerequisiteId: 'kode_for',
-    treeX: 800,
-    treeY: 580,
+    treeX: 620,
+    treeY: 830,
   },
-
-  // ROW 6 (Random Module — uses Corn & Wood, NO Stone/Batu!)
+  {
+    id: 'kode_dict',
+    branch: 'kode',
+    title: 'Python Dictionaries',
+    subtitle: 'plan = {"x": 0, "seed": "corn"}',
+    description: 'Menyimpan pemetaan pasangan key-value menggunakan struktur data dictionary {k: v}.',
+    syntaxBadge: '{1:2}',
+    visualKind: 'code',
+    unlocked: false,
+    level: 0,
+    maxLevel: 1,
+    costs: [
+      { resource: 'kayu', amount: 6 },
+      { resource: 'jagung', amount: 6 },
+    ],
+    prerequisiteId: 'kode_list',
+    treeX: 735,
+    treeY: 830,
+  },
   {
     id: 'kode_random',
     branch: 'kode',
     title: 'Random Module',
     subtitle: 'import random',
-    description: 'Membuka import random dan random.choice() untuk menanam variasi tanaman secara acak.',
+    description: 'Membuka import random, random.choice(), dan random.randint() untuk menanam variasi tanaman secara acak.',
     syntaxBadge: 'import random',
     visualKind: 'code',
     unlocked: false,
@@ -316,8 +505,8 @@ export const INITIAL_TECH_NODES: TechNode[] = [
       { resource: 'kayu', amount: 6 },
     ],
     prerequisiteId: 'kode_def',
-    treeX: 800,
-    treeY: 715,
+    treeX: 850,
+    treeY: 830,
   },
 ];
 
@@ -336,7 +525,7 @@ turn("right")
   {
     id: 'auto_farm',
     name: 'auto_farm',
-    code: `# Requires 'while', 'if', and 'go_to_fuel()' unlocked in Tech Tree (^)
+    code: `# Continuous loop automation
 while True:
     if tractor.fuel < 25:
         tractor.go_to_fuel()
@@ -357,23 +546,16 @@ while True:
 `,
   },
   {
-    id: 'grid_sweep',
-    name: 'grid_sweep',
-    code: `# Requires 'for', 'list', and 'def' unlocked in Tech Tree (^)
-def work_tile(seed_name):
+    id: 'multi_tractor',
+    name: 'multi_tractor',
+    code: `# Control multiple tractors using Python code (Unlock 'Armada Multi-Traktor')
+for i in range(num_tractors()):
+    use_tractor(i)
     if can_harvest():
         harvest()
-    if check_soil() == "wild":
-        plow()
-    if check_soil() == "plowed":
-        plant(seed_name)
-
-seeds = ["wheat", "carrot", "corn", "wood"]
-
-for i in range(4):
-    work_tile(seeds[i % 4])
+    plow()
+    plant("wheat")
     move(1)
-    turn("right")
 `,
   },
 ];

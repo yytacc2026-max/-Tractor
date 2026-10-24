@@ -36,6 +36,8 @@ export interface Inventory {
 }
 
 export interface TractorState {
+  id?: number;
+  colorHex?: number;
   x: number;
   z: number;
   direction: Direction;
@@ -46,6 +48,8 @@ export interface TractorState {
   maxCargo: number;
   isMoving: boolean;
   statusMessage: string;
+  autoHelper?: boolean;
+  preferredSeed?: CropType;
 }
 
 export type TechBranch = 'kode' | 'alat' | 'logistik';
@@ -59,13 +63,16 @@ export type NodeVisualKind =
   | 'code'
   | 'wheat'
   | 'tractor_speed'
+  | 'multi_tractor'
   | 'grid_expand'
   | 'carrot'
   | 'fuel_tank'
   | 'wood_tree'
-  | 'trailer'
+  | 'fertilizer'
+  | 'irrigation'
   | 'corn'
-  | 'autopilot';
+  | 'autopilot'
+  | 'trophy';
 
 export interface TechNode {
   id: string;

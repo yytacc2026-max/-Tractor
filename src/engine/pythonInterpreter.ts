@@ -2,7 +2,7 @@ import { Direction, ImplementType } from '../types/game';
 
 export interface ExecutionContext {
   // Queries
-  getTractorState: () => {
+  getTractorState: (tractorIdx?: number) => {
     x: number;
     z: number;
     direction: Direction;
@@ -12,23 +12,31 @@ export interface ExecutionContext {
     cargo: number;
     max_cargo: number;
   };
+  getTractorCount: () => number;
   getWorldSize: () => number;
-  checkSoil: () => string;
-  canHarvest: () => boolean;
+  checkSoil: (tractorIdx?: number) => string;
+  canHarvest: (tractorIdx?: number) => boolean;
+  measureCrop: (tractorIdx?: number) => number;
+  getElapsedTime: () => number;
   isNodeUnlocked: (nodeId: string) => boolean;
 
   // Async Actions (each awaits simulation tick)
-  move: (arg?: number | string) => Promise<void>;
-  turn: (dir: string) => Promise<void>;
-  equip: (tool: string) => Promise<void>;
-  plow: () => Promise<void>;
-  plant: (seed?: string) => Promise<void>;
-  harvest: () => Promise<void>;
-  refuel: () => Promise<void>;
-  deliver: () => Promise<void>;
-  goToFuel: () => Promise<void>;
-  goToBarn: () => Promise<void>;
-  goToCoord: (targetX: number, targetZ: number) => Promise<void>;
+  setActiveTractorIndex: (idx: number) => void;
+  setSimSpeed: (speed: number) => void;
+  startHelper: (idx: number, seed: string) => Promise<void>;
+  fertilize: (tractorIdx?: number) => Promise<void>;
+  clearField: () => Promise<void>;
+  move: (arg?: number | string, tractorIdx?: number) => Promise<void>;
+  turn: (dir: string, tractorIdx?: number) => Promise<void>;
+  equip: (tool: string, tractorIdx?: number) => Promise<void>;
+  plow: (tractorIdx?: number) => Promise<void>;
+  plant: (seed?: string, tractorIdx?: number) => Promise<void>;
+  harvest: (tractorIdx?: number) => Promise<void>;
+  refuel: (tractorIdx?: number) => Promise<void>;
+  deliver: (tractorIdx?: number) => Promise<void>;
+  goToFuel: (tractorIdx?: number) => Promise<void>;
+  goToBarn: (tractorIdx?: number) => Promise<void>;
+  goToCoord: (targetX: number, targetZ: number, tractorIdx?: number) => Promise<void>;
 
   // Telemetry & UI callbacks
   onActiveLine: (line: number) => void;
@@ -67,10 +75,14 @@ export class AgroPythonInterpreter {
     this.variables = {};
     this.functions = {};
     this.stepCount = 0;
+    this.ctx.setActiveTractorIndex(0);
 
     const lines = this.preprocessLines(rawCode);
     if (lines.length === 0) {
-      this.ctx.onLog('warn', 'Code editor is empty. Write Python commands like move(1), plow(), plant("wheat"), or harvest().');
+      this.ctx.onLog(
+        'warn',
+        'Code editor is empty. Write Python commands like move(1), plow(), plant("wheat"), or harvest().'
+      );
       return;
     }
 
@@ -143,8 +155,10 @@ export class AgroPythonInterpreter {
       if (this.ctx.shouldStop()) return;
 
       this.stepCount++;
-      if (this.stepCount > 5000) {
-        throw new Error('Execution stopped automatically after 5000 steps to prevent an infinite loop without actions.');
+      if (this.stepCount > 8000) {
+        throw new Error(
+          'Execution stopped automatically after 8000 steps to prevent an infinite loop without actions.'
+        );
       }
 
       // 1. import random
@@ -291,25 +305,29 @@ export class AgroPythonInterpreter {
         const rhs = assignMatch[2].trim();
         if (rhs.startsWith('[')) {
           this.checkSyntaxUnlock('kode_list', 'list ([...])', lineNumber);
+        } else if (rhs.startsWith('{')) {
+          this.checkSyntaxUnlock('kode_dict', 'dict ({...})', lineNumber);
         }
         this.variables[varName] = this.evalExpr(rhs, lineNumber);
         i++;
         continue;
       }
 
-      // 7. Compound Assignment: x += expr or x -= expr
-      const compoundMatch = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\+=|-=)\s*(.+)$/);
+      // 7. Compound Assignment: x += expr, x -= expr, x *= expr
+      const compoundMatch = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\+=|-=|\*=)\s*(.+)$/);
       if (compoundMatch) {
         const varName = compoundMatch[1];
         const op = compoundMatch[2];
         const rhsVal = Number(this.evalExpr(compoundMatch[3].trim(), lineNumber));
         const curVal = Number(this.variables[varName] ?? 0);
-        this.variables[varName] = op === '+=' ? curVal + rhsVal : curVal - rhsVal;
+        if (op === '+=') this.variables[varName] = curVal + rhsVal;
+        else if (op === '-=') this.variables[varName] = curVal - rhsVal;
+        else if (op === '*=') this.variables[varName] = curVal * rhsVal;
         i++;
         continue;
       }
 
-      // 8. Function or Method Call
+      // 8. Function or Method Call (including tractors[i].method())
       await this.executeStatementCall(text, lineNumber);
       i++;
     }
@@ -336,22 +354,36 @@ export class AgroPythonInterpreter {
 
     const val = this.evalExpr(expr, line);
     if (Array.isArray(val)) return val;
+    if (val && typeof val === 'object') return Object.keys(val);
     throw new Error(`Line ${line}: '${expr}' is not a list or range().`);
   }
 
   private async executeStatementCall(stmt: string, line: number): Promise<void> {
     if (stmt === 'pass') return;
 
-    const callMatch = stmt.match(/^([a-zA-Z_][a-zA-Z0-9_.]*)\s*\((.*)\)$/);
-    if (!callMatch) {
-      throw new Error(
-        `Line ${line}: Unrecognized Python statement '${stmt}'. Use functions like move(1), turn("right"), plow(), plant("wheat"), or harvest().`
-      );
+    // Support indexed tractor method calls: tractors[1].move(1), tractors[i].plant("corn")
+    const indexedTractorMatch = stmt.match(/^tractors\[(.+)\]\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)$/);
+    let specificTractorIdx: number | undefined = undefined;
+    let rawName = '';
+    let rawArgs = '';
+
+    if (indexedTractorMatch) {
+      specificTractorIdx = Number(this.evalExpr(indexedTractorMatch[1], line));
+      rawName = indexedTractorMatch[2];
+      rawArgs = indexedTractorMatch[3].trim();
+    } else {
+      const callMatch = stmt.match(/^([a-zA-Z_][a-zA-Z0-9_.]*)\s*\((.*)\)$/);
+      if (!callMatch) {
+        throw new Error(
+          `Line ${line}: Unrecognized Python statement '${stmt}'. Use functions like move(1), turn("right"), plow(), plant("wheat"), or harvest().`
+        );
+      }
+      rawName = callMatch[1];
+      rawArgs = callMatch[2].trim();
     }
 
-    const rawName = callMatch[1];
-    const rawArgs = callMatch[2].trim();
-    const args = rawArgs.length > 0 ? this.splitArgs(rawArgs).map((a) => this.evalExpr(a, line)) : [];
+    const args =
+      rawArgs.length > 0 ? this.splitArgs(rawArgs).map((a) => this.evalExpr(a, line)) : [];
 
     const fnName = rawName.replace(/^(tractor|traktor)\./, '');
 
@@ -369,93 +401,135 @@ export class AgroPythonInterpreter {
     switch (fnName) {
       case 'print': {
         this.checkSyntaxUnlock('kode_print', 'print()', line);
-        const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+        const msg = args
+          .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
+          .join(' ');
         this.ctx.onLog('print', msg, line);
+        break;
+      }
+      case 'use_tractor':
+      case 'select_tractor': {
+        const idx = Number(args[0] ?? 0);
+        this.ctx.setActiveTractorIndex(idx);
+        this.ctx.onLog('info', `Switched active control to Tractor #${idx + 1}.`, line);
+        break;
+      }
+      case 'start_helper':
+      case 'spawn_helper': {
+        const idx = Number(args[0] ?? 1);
+        const seed = String(args[1] ?? 'wheat').toLowerCase();
+        await this.ctx.startHelper(idx, seed);
+        break;
+      }
+      case 'set_speed': {
+        const spd = Math.max(0.5, Math.min(5, Number(args[0] ?? 1)));
+        this.ctx.setSimSpeed(spd);
+        this.ctx.onLog('info', `set_speed(${spd}x)`, line);
+        break;
+      }
+      case 'fertilize':
+      case 'pupuk': {
+        this.checkSyntaxUnlock('alat_pupuk', 'fertilize()', line);
+        await this.ctx.fertilize(specificTractorIdx);
+        break;
+      }
+      case 'clear':
+      case 'reset_field': {
+        await this.ctx.clearField();
         break;
       }
       case 'move':
       case 'maju': {
         const arg0 = args[0];
-        if (typeof arg0 === 'string' && ['north', 'east', 'south', 'west', 'right', 'left'].includes(arg0.toLowerCase())) {
-          await this.ctx.move(arg0.toLowerCase());
+        if (
+          typeof arg0 === 'string' &&
+          ['north', 'east', 'south', 'west', 'right', 'left'].includes(arg0.toLowerCase())
+        ) {
+          await this.ctx.move(arg0.toLowerCase(), specificTractorIdx);
         } else {
           const steps = arg0 !== undefined ? Number(arg0) : 1;
-          await this.ctx.move(Math.max(1, Math.min(20, Math.round(steps))));
+          await this.ctx.move(Math.max(1, Math.min(28, Math.round(steps))), specificTractorIdx);
         }
         break;
       }
       case 'turn':
       case 'belok': {
         const dir = String(args[0] ?? 'right').toLowerCase();
-        await this.ctx.turn(dir);
+        await this.ctx.turn(dir, specificTractorIdx);
         break;
       }
       case 'equip':
       case 'pasang_alat': {
         const toolName = String(args[0] ?? 'plow').toLowerCase();
-        await this.ctx.equip(toolName);
+        await this.ctx.equip(toolName, specificTractorIdx);
         break;
       }
       case 'plow':
       case 'till':
       case 'bajak': {
-        await this.ctx.plow();
+        await this.ctx.plow(specificTractorIdx);
         break;
       }
       case 'plant':
       case 'tanam': {
         const seed = args[0] !== undefined ? String(args[0]).toLowerCase() : 'wheat';
-        await this.ctx.plant(seed);
+        await this.ctx.plant(seed, specificTractorIdx);
         break;
       }
       case 'harvest':
       case 'panen': {
-        await this.ctx.harvest();
+        await this.ctx.harvest(specificTractorIdx);
         break;
       }
       case 'refuel':
       case 'isi_bahan_bakar': {
-        await this.ctx.refuel();
+        await this.ctx.refuel(specificTractorIdx);
         break;
       }
       case 'deliver':
       case 'unload':
       case 'kirim_ke_gudang': {
-        await this.ctx.deliver();
+        await this.ctx.deliver(specificTractorIdx);
         break;
       }
       case 'go_to_fuel':
       case 'ke_pom_bensin': {
-        await this.ctx.goToFuel();
+        await this.ctx.goToFuel(specificTractorIdx);
         break;
       }
       case 'go_to_barn':
       case 'ke_gudang': {
-        await this.ctx.goToBarn();
+        await this.ctx.goToBarn(specificTractorIdx);
         break;
       }
+      case 'goto':
       case 'go_to':
       case 'ke': {
         const tx = Number(args[0] ?? 0);
         const tz = Number(args[1] ?? 0);
-        await this.ctx.goToCoord(tx, tz);
+        await this.ctx.goToCoord(tx, tz, specificTractorIdx);
         break;
       }
       case 'check_soil':
       case 'get_ground_type':
       case 'cek_tanah': {
-        const res = this.ctx.checkSoil();
+        const res = this.ctx.checkSoil(specificTractorIdx);
         this.ctx.onLog('info', `check_soil() -> "${res}"`, line);
         break;
       }
       case 'can_harvest':
       case 'tanaman_siap': {
-        const ready = this.ctx.canHarvest();
+        const ready = this.ctx.canHarvest(specificTractorIdx);
         this.ctx.onLog('info', `can_harvest() -> ${ready ? 'True' : 'False'}`, line);
         break;
       }
+      case 'measure': {
+        const m = this.ctx.measureCrop(specificTractorIdx);
+        this.ctx.onLog('info', `measure() -> ${m}%`, line);
+        break;
+      }
       case 'status': {
-        const st = this.ctx.getTractorState();
+        const st = this.ctx.getTractorState(specificTractorIdx);
         this.ctx.onLog(
           'info',
           `status() -> pos=(${st.x}, ${st.z}), dir="${st.direction}", fuel=${Math.round(st.fuel)}/${st.max_fuel}, tool="${st.tool}", cargo=${st.cargo}/${st.max_cargo}`,
@@ -464,9 +538,7 @@ export class AgroPythonInterpreter {
         break;
       }
       default:
-        throw new Error(
-          `Line ${line}: Unknown Python function '${rawName}()'.`
-        );
+        throw new Error(`Line ${line}: Unknown Python function '${rawName}()'.`);
     }
   }
 
@@ -488,8 +560,8 @@ export class AgroPythonInterpreter {
         }
       }
       if (!inQuotes) {
-        if (ch === '[' || ch === '(') depth++;
-        if (ch === ']' || ch === ')') depth--;
+        if (ch === '[' || ch === '(' || ch === '{') depth++;
+        if (ch === ']' || ch === ')' || ch === '}') depth--;
         if (ch === ',' && depth === 0) {
           result.push(current.trim());
           current = '';
@@ -558,6 +630,7 @@ export class AgroPythonInterpreter {
       return Number(trimmed);
     }
 
+    // List literal [...]
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       this.checkSyntaxUnlock('kode_list', 'list ([...])', line);
       const inner = trimmed.slice(1, -1).trim();
@@ -565,14 +638,43 @@ export class AgroPythonInterpreter {
       return this.splitArgs(inner).map((item) => this.evalExpr(item, line));
     }
 
+    // Tuple literal (x, y)
+    if (trimmed.startsWith('(') && trimmed.endsWith(')') && trimmed.includes(',')) {
+      const inner = trimmed.slice(1, -1).trim();
+      return this.splitArgs(inner).map((item) => this.evalExpr(item, line));
+    }
+
+    // Dictionary literal {k: v}
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      this.checkSyntaxUnlock('kode_dict', 'dict ({...})', line);
+      const inner = trimmed.slice(1, -1).trim();
+      if (!inner) return {};
+      const entries = this.splitArgs(inner);
+      const obj: Record<string, any> = {};
+      for (const entry of entries) {
+        const colonIdx = entry.indexOf(':');
+        if (colonIdx !== -1) {
+          const k = String(this.evalExpr(entry.slice(0, colonIdx), line));
+          const v = this.evalExpr(entry.slice(colonIdx + 1), line);
+          obj[k] = v;
+        }
+      }
+      return obj;
+    }
+
+    // Indexing arr[idx] or dict[key]
     const indexMatch = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[(.+)\]$/);
     if (indexMatch) {
-      const arr = this.variables[indexMatch[1]];
-      const idx = Number(this.evalExpr(indexMatch[2], line));
-      if (Array.isArray(arr)) {
-        return arr[((idx % arr.length) + arr.length) % arr.length];
+      const target = this.variables[indexMatch[1]];
+      const keyOrIdx = this.evalExpr(indexMatch[2], line);
+      if (Array.isArray(target)) {
+        const idx = Number(keyOrIdx);
+        return target[((idx % target.length) + target.length) % target.length];
       }
-      throw new Error(`Line ${line}: '${indexMatch[1]}' is not a list.`);
+      if (target && typeof target === 'object') {
+        return target[String(keyOrIdx)];
+      }
+      throw new Error(`Line ${line}: '${indexMatch[1]}' is not a list or dict.`);
     }
 
     const addIdx = this.findTopLevelOp(trimmed, '+');
@@ -588,11 +690,42 @@ export class AgroPythonInterpreter {
       const r = this.evalExpr(trimmed.slice(subIdx + 1), line);
       return Number(l) - Number(r);
     }
+    const mulIdx = this.findTopLevelOp(trimmed, '*');
+    if (mulIdx !== -1) {
+      const l = this.evalExpr(trimmed.slice(0, mulIdx), line);
+      const r = this.evalExpr(trimmed.slice(mulIdx + 1), line);
+      return Number(l) * Number(r);
+    }
+    const floorDivIdx = this.findTopLevelOp(trimmed, '//');
+    if (floorDivIdx !== -1) {
+      const l = this.evalExpr(trimmed.slice(0, floorDivIdx), line);
+      const r = this.evalExpr(trimmed.slice(floorDivIdx + 2), line);
+      return Math.floor(Number(l) / Math.max(1, Number(r)));
+    }
     const modIdx = this.findTopLevelOp(trimmed, '%');
     if (modIdx !== -1) {
       const l = this.evalExpr(trimmed.slice(0, modIdx), line);
       const r = this.evalExpr(trimmed.slice(modIdx + 1), line);
       return Number(l) % Number(r);
+    }
+
+    // Support tractors[i].can_harvest(), tractors[i].check_soil(), tractors[i].fuel, tractors[i].x, tractors[i].z
+    const indexedPropMatch = trimmed.match(/^tractors\[(.+)\]\.([a-zA-Z_][a-zA-Z0-9_]*(\(\))?)$/);
+    if (indexedPropMatch) {
+      const tIdx = Number(this.evalExpr(indexedPropMatch[1], line));
+      const member = indexedPropMatch[2];
+      const tState = this.ctx.getTractorState(tIdx);
+      if (member === 'can_harvest()') return this.ctx.canHarvest(tIdx);
+      if (member === 'check_soil()' || member === 'get_ground_type()') return this.ctx.checkSoil(tIdx);
+      if (member === 'measure()') return this.ctx.measureCrop(tIdx);
+      if (member === 'fuel') return tState.fuel;
+      if (member === 'max_fuel') return tState.max_fuel;
+      if (member === 'x') return tState.x;
+      if (member === 'z' || member === 'y') return tState.z;
+      if (member === 'direction') return tState.direction;
+      if (member === 'tool') return tState.tool;
+      if (member === 'cargo') return tState.cargo;
+      if (member === 'max_cargo') return tState.max_cargo;
     }
 
     const normalizedCall = trimmed.replace(/^(tractor|traktor)\./, '');
@@ -609,6 +742,15 @@ export class AgroPythonInterpreter {
     if (normalizedCall === 'get_world_size()' || normalizedCall === 'ukuran_ladang()') {
       return this.ctx.getWorldSize();
     }
+    if (normalizedCall === 'num_tractors()' || normalizedCall === 'get_tractor_count()') {
+      return this.ctx.getTractorCount();
+    }
+    if (normalizedCall === 'measure()') {
+      return this.ctx.measureCrop();
+    }
+    if (normalizedCall === 'get_time()') {
+      return this.ctx.getElapsedTime();
+    }
     if (normalizedCall === 'status()') {
       return this.ctx.getTractorState();
     }
@@ -617,6 +759,7 @@ export class AgroPythonInterpreter {
     if (lenMatch) {
       const target = this.evalExpr(lenMatch[1], line);
       if (Array.isArray(target) || typeof target === 'string') return target.length;
+      if (target && typeof target === 'object') return Object.keys(target).length;
       return 0;
     }
 
@@ -693,8 +836,8 @@ export class AgroPythonInterpreter {
         }
       }
       if (!inQuotes) {
-        if (ch === '(' || ch === '[') depth++;
-        else if (ch === ')' || ch === ']') depth--;
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}') depth--;
         else if (depth === 0 && expr.slice(i, i + op.length) === op) {
           if ((op === '<' || op === '>') && expr[i + 1] === '=') continue;
           return i;
