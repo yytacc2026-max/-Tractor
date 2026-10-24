@@ -1,0 +1,6 @@
+{
+  "name": "AgroCode: Ladang Otomatis 3D",
+  "description": "Game simulasi pertanian 3D berbasis pemrograman Python dengan traktor di pulau melayang, pohon teknologi tiga cabang, dan asisten optimasi kode AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
