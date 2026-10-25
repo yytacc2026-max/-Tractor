@@ -118,8 +118,13 @@ const DEFAULT_TRACTOR_STATE: TractorState = {
 export default function App() {
   // Game Shell State
   const [screen, setScreen] = useState<GameShellScreen>('title');
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [musicVolume, setMusicVolume] = useState<number>(50);
+  const [sfxVolume, setSfxVolume] = useState<number>(80);
+  const [musicMuted, setMusicMuted] = useState<boolean>(false);
+  const [sfxMuted, setSfxMuted] = useState<boolean>(false);
   const [showMainMenuSlots, setShowMainMenuSlots] = useState<boolean>(false);
+  const [showMainMenuOptions, setShowMainMenuOptions] = useState<boolean>(false);
+  const [showPauseOptions, setShowPauseOptions] = useState<boolean>(false);
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [confirmOverwriteSlot, setConfirmOverwriteSlot] = useState<string | null>(null);
 
@@ -1503,7 +1508,7 @@ export default function App() {
             </p>
 
             {/* Main Menu Action Buttons */}
-            {!showMainMenuSlots ? (
+            {!showMainMenuSlots && !showMainMenuOptions ? (
               <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs">
                 {latestSaveSlot && (
                   <button
@@ -1526,11 +1531,144 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => setShowMainMenuSlots(true)}
+                  onClick={() => {
+                    setShowMainMenuOptions(false);
+                    setShowMainMenuSlots(true);
+                  }}
                   className="w-full px-6 py-2.5 rounded-md bg-[#232527]/95 hover:bg-[#323639] active:scale-95 text-[#E2E8F0] font-mono-code font-bold text-xs tracking-wide border border-[#5A6065] shadow-lg transition-all cursor-pointer flex items-center justify-center"
                 >
                   <span>PILIH SLOT</span>
                 </button>
+
+                <button
+                  onClick={() => {
+                    setShowMainMenuSlots(false);
+                    setShowMainMenuOptions(true);
+                  }}
+                  className="w-full px-6 py-2.5 rounded-md bg-[#232527]/95 hover:bg-[#323639] active:scale-95 text-[#E2E8F0] font-mono-code font-bold text-xs tracking-wide border border-[#5A6065] shadow-lg transition-all cursor-pointer flex items-center justify-center"
+                >
+                  <span>OPTION</span>
+                </button>
+              </div>
+            ) : showMainMenuOptions ? (
+              /* Main Menu OPTION Panel (Music & SFX Audio Settings Only) */
+              <div className="mt-6 w-full max-w-md rounded-lg border-2 border-[#686E74] bg-[#232527]/95 p-4 text-left shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-[#3D4145] pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-display font-bold text-white">
+                      OPTION — Pengaturan Suara
+                    </h3>
+                    <p className="text-[11px] font-mono-code text-[#9BA3AB]">
+                      Atur volume suara Musik dan Efek Suara (SFX)
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowMainMenuOptions(false)}
+                    className="w-7 h-7 rounded bg-[#C93B2B] hover:bg-[#E04535] text-white font-mono-code font-bold text-xs flex items-center justify-center cursor-pointer"
+                    title="Kembali ke Main Menu"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Musik Setting */}
+                  <div className="rounded border border-[#454A4F] bg-[#2D3033] p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono-code text-xs font-bold text-white">
+                        Suara Musik (BGM)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono-code text-xs text-[#9CD03B]">
+                          {musicMuted ? 'MUTE (0%)' : `${musicVolume}%`}
+                        </span>
+                        <button
+                          onClick={() => {
+                            const nextMuted = !musicMuted;
+                            setMusicMuted(nextMuted);
+                            soundFX.setMusicMuted(nextMuted);
+                          }}
+                          className={`px-2.5 py-1 rounded font-mono-code text-[11px] font-bold border cursor-pointer ${
+                            musicMuted
+                              ? 'bg-[#C93B2B] text-white border-[#E04535]'
+                              : 'bg-[#658B1E] text-white border-[#88B82E]'
+                          }`}
+                        >
+                          {musicMuted ? 'OFF' : 'ON'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={musicMuted ? 0 : musicVolume}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setMusicVolume(val);
+                        setMusicMuted(val === 0);
+                        soundFX.setMusicVolume(val / 100);
+                      }}
+                      className="w-full accent-[#88B82E] cursor-pointer"
+                    />
+                  </div>
+
+                  {/* SFX Setting */}
+                  <div className="rounded border border-[#454A4F] bg-[#2D3033] p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono-code text-xs font-bold text-white">
+                        Efek Suara (SFX)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono-code text-xs text-[#FFD166]">
+                          {sfxMuted ? 'MUTE (0%)' : `${sfxVolume}%`}
+                        </span>
+                        <button
+                          onClick={() => {
+                            const nextMuted = !sfxMuted;
+                            setSfxMuted(nextMuted);
+                            soundFX.setSfxMuted(nextMuted);
+                            if (!nextMuted) {
+                              soundFX.playEquip();
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded font-mono-code text-[11px] font-bold border cursor-pointer ${
+                            sfxMuted
+                              ? 'bg-[#C93B2B] text-white border-[#E04535]'
+                              : 'bg-[#658B1E] text-white border-[#88B82E]'
+                          }`}
+                        >
+                          {sfxMuted ? 'OFF' : 'ON'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={sfxMuted ? 0 : sfxVolume}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setSfxVolume(val);
+                        setSfxMuted(val === 0);
+                        soundFX.setSfxVolume(val / 100);
+                      }}
+                      onMouseUp={() => {
+                        if (!sfxMuted && sfxVolume > 0) soundFX.playEquip();
+                      }}
+                      className="w-full accent-[#88B82E] cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-1 flex justify-end">
+                  <button
+                    onClick={() => setShowMainMenuOptions(false)}
+                    className="px-4 py-1.5 rounded bg-[#383C40] hover:bg-[#494E53] text-white font-mono-code text-xs cursor-pointer"
+                  >
+                    Kembali
+                  </button>
+                </div>
               </div>
             ) : (
               /* Main Menu Save / Load Slots Panel (Load Only — Never Overwrites Existing Saves from Main Menu) */
@@ -1776,19 +1914,10 @@ export default function App() {
 
               <button
                 onClick={() => {
-                  const nextMuted = !isMuted;
-                  soundFX.setMuted(nextMuted);
-                  setIsMuted(nextMuted);
+                  setShowPauseOptions(false);
+                  setScreen('paused');
                 }}
-                title={isMuted ? 'Unmute Musik & Audio' : 'Mute Musik & Audio'}
-                className="w-10 h-10 flex items-center justify-center rounded bg-[#474A4D] hover:bg-[#5A5E62] text-white text-xs font-mono-code border border-[#6E7378] shadow-lg transition-colors cursor-pointer"
-              >
-                {isMuted ? 'MUTE' : 'SFX'}
-              </button>
-
-              <button
-                onClick={() => setScreen('paused')}
-                title="Buka Menu & Save Game (Esc)"
+                title="Buka Menu, Option & Save Game (Esc)"
                 className="px-2.5 h-10 flex items-center justify-center rounded bg-[#34383C] hover:bg-[#494E54] active:scale-95 text-white font-mono-code text-xs font-bold border border-[#6E7378] shadow-lg transition-all cursor-pointer"
               >
                 MENU
@@ -1867,22 +1996,25 @@ export default function App() {
         />
       )}
 
-      {/* 5. PAUSE, SAVE GAME & MAIN MENU MODAL */}
+      {/* 5. PAUSE, OPTION, SAVE GAME & MAIN MENU MODAL */}
       {screen === 'paused' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 pointer-events-auto">
           <div className="w-full max-w-md rounded-lg border-2 border-[#686E74] bg-[#232527] p-5 text-center space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#3D4145] pb-2.5">
               <div className="text-left">
                 <h2 className="text-lg font-display font-bold text-white">
-                  Menu Permainan & Save Game
+                  {showPauseOptions ? 'OPTION — Pengaturan Suara' : 'Menu Permainan & Save Game'}
                 </h2>
                 <p className="text-[11px] text-[#B8BFC6] font-mono-code">
-                  pos=({tractor.x}, {tractor.z}) · fuel={Math.round(tractor.fuel)}/{tractor.maxFuel}L · tractors={totalTractorsCount}
+                  {showPauseOptions
+                    ? 'Atur volume suara Musik dan Efek Suara (SFX)'
+                    : `pos=(${tractor.x}, ${tractor.z}) · fuel=${Math.round(tractor.fuel)}/${tractor.maxFuel}L · tractors=${totalTractorsCount}`}
                 </p>
               </div>
               <button
                 onClick={() => {
                   setConfirmOverwriteSlot(null);
+                  setShowPauseOptions(false);
                   setScreen('playing');
                 }}
                 className="w-8 h-8 rounded bg-[#C93B2B] hover:bg-[#E04535] text-white font-mono-code font-bold text-sm flex items-center justify-center cursor-pointer"
@@ -1892,142 +2024,256 @@ export default function App() {
               </button>
             </div>
 
-            {/* Save Slots inside Pause Menu */}
-            <div className="text-left space-y-2">
-              <div className="text-xs font-mono-code font-bold text-[#E2E8F0]">
-                PILIH SLOT SAVE GAME:
-              </div>
-              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                {(['slot_1', 'slot_2', 'slot_3'] as const).map((slotKey) => {
-                  const slot = saveSlots[slotKey];
-                  const slotLabel = `Save Slot ${slotKey.replace('slot_', '')}`;
-                  const isConfirmingOverwrite = confirmOverwriteSlot === slotKey;
-                  const unlockedCount = slot?.techProgress
-                    ? Object.values(slot.techProgress).reduce(
-                        (acc, cur) => acc + (cur.level || (cur.unlocked ? 1 : 0)),
-                        0
-                      )
-                    : 0;
-
-                  return (
-                    <div
-                      key={slotKey}
-                      className="flex items-center justify-between gap-2 rounded border border-[#454A4F] bg-[#2D3033] px-3 py-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono-code text-xs font-bold text-white">
-                            {slotLabel}
-                          </span>
-                          {slot && (
-                            <span className="text-[10px] font-mono-code text-[#9CD03B]">
-                              {slot.savedAt}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] font-mono-code text-[#B8BFC6] truncate">
-                          {slot
-                            ? `Pulau ${slot.tiles?.length || 4}x${slot.tiles?.length || 4} · Tech Lv.${unlockedCount} · Wheat ${slot.warehouse?.jerami ?? 0} · Carrot ${slot.warehouse?.wortel ?? 0} · Wood ${slot.warehouse?.kayu ?? 0} · Corn ${slot.warehouse?.jagung ?? 0}`
-                            : 'Slot Kosong'}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {isConfirmingOverwrite ? (
-                          <>
-                            <button
-                              onClick={() => saveGameToSlot(slotKey, slotLabel)}
-                              className="px-2 py-1 rounded bg-[#C93B2B] hover:bg-[#E04535] text-white font-mono-code text-[11px] font-bold cursor-pointer"
-                              title="Konfirmasi Timpa Save Slot Ini"
-                            >
-                              Timpa!
-                            </button>
-                            <button
-                              onClick={() => setConfirmOverwriteSlot(null)}
-                              className="px-2 py-1 rounded bg-[#3B4045] hover:bg-[#4E555B] text-[#E2E8F0] font-mono-code text-[11px] cursor-pointer"
-                            >
-                              Batal
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            {slot && (
-                              <button
-                                onClick={() => loadGameFromSlot(slotKey)}
-                                className="px-2.5 py-1 rounded bg-[#658B1E] hover:bg-[#76A124] text-white font-mono-code text-xs font-bold border border-[#88B82E] cursor-pointer"
-                              >
-                                Muat
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                if (slot) {
-                                  setConfirmOverwriteSlot(slotKey);
-                                } else {
-                                  saveGameToSlot(slotKey, slotLabel);
-                                }
-                              }}
-                              className="px-2.5 py-1 rounded bg-[#3B4045] hover:bg-[#4E555B] text-white font-mono-code text-xs font-bold border border-[#5D646B] cursor-pointer"
-                            >
-                              Simpan
-                            </button>
-                          </>
-                        )}
-                      </div>
+            {showPauseOptions ? (
+              /* In-Game OPTION View inside MENU Modal (Music & SFX Only) */
+              <div className="text-left space-y-3">
+                {/* Musik Setting */}
+                <div className="rounded border border-[#454A4F] bg-[#2D3033] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono-code text-xs font-bold text-white">
+                      Suara Musik (BGM)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono-code text-xs text-[#9CD03B]">
+                        {musicMuted ? 'MUTE (0%)' : `${musicVolume}%`}
+                      </span>
+                      <button
+                        onClick={() => {
+                          const nextMuted = !musicMuted;
+                          setMusicMuted(nextMuted);
+                          soundFX.setMusicMuted(nextMuted);
+                        }}
+                        className={`px-2.5 py-1 rounded font-mono-code text-[11px] font-bold border cursor-pointer ${
+                          musicMuted
+                            ? 'bg-[#C93B2B] text-white border-[#E04535]'
+                            : 'bg-[#658B1E] text-white border-[#88B82E]'
+                        }`}
+                      >
+                        {musicMuted ? 'OFF' : 'ON'}
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={musicMuted ? 0 : musicVolume}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setMusicVolume(val);
+                      setMusicMuted(val === 0);
+                      soundFX.setMusicVolume(val / 100);
+                    }}
+                    className="w-full accent-[#88B82E] cursor-pointer"
+                  />
+                </div>
 
-            <div className="flex flex-col gap-2 pt-1">
-              <button
-                onClick={() => {
-                  setConfirmOverwriteSlot(null);
-                  setScreen('playing');
-                }}
-                className="w-full py-2.5 rounded bg-[#658B1E] hover:bg-[#76A124] text-white font-semibold text-sm border border-[#84B034] cursor-pointer"
-              >
-                Lanjutkan Bermain (Esc)
-              </button>
-              <button
-                onClick={() => {
-                  stopPythonExecution();
-                  const expandLv =
-                    techNodes.find((n) => n.id === 'logistik_ekspansi')?.level ?? 0;
-                  const irLv = getNodeLevel('logistik_irigasi');
-                  const resetGrid = createInitialGrid(getIslandSizeForLevel(expandLv), irLv);
-                  tilesRef.current = resetGrid;
-                  setTiles(resetGrid);
-                  setTractor((t) => {
-                    const next = {
-                      ...t,
-                      x: 1,
-                      z: 1,
-                      direction: 'selatan' as const,
-                      fuel: t.maxFuel,
-                    };
-                    tractorRef.current = next;
-                    return next;
-                  });
-                  setConfirmOverwriteSlot(null);
-                  setScreen('playing');
-                }}
-                className="w-full py-2 rounded bg-[#34383C] hover:bg-[#43484D] text-white font-semibold text-xs cursor-pointer"
-              >
-                Reset Posisi Traktor & Ladang
-              </button>
-              <button
-                onClick={() => {
-                  stopPythonExecution();
-                  setConfirmOverwriteSlot(null);
-                  setShowMainMenuSlots(false);
-                  setScreen('title');
-                }}
-                className="w-full py-2.5 rounded bg-[#2B2E31] hover:bg-[#383C40] text-[#E2E8F0] font-semibold text-sm border border-[#52565A] cursor-pointer"
-              >
-                Kembali ke Main Menu
-              </button>
-            </div>
+                {/* SFX Setting */}
+                <div className="rounded border border-[#454A4F] bg-[#2D3033] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono-code text-xs font-bold text-white">
+                      Efek Suara (SFX)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono-code text-xs text-[#FFD166]">
+                        {sfxMuted ? 'MUTE (0%)' : `${sfxVolume}%`}
+                      </span>
+                      <button
+                        onClick={() => {
+                          const nextMuted = !sfxMuted;
+                          setSfxMuted(nextMuted);
+                          soundFX.setSfxMuted(nextMuted);
+                          if (!nextMuted) {
+                            soundFX.playEquip();
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded font-mono-code text-[11px] font-bold border cursor-pointer ${
+                          sfxMuted
+                            ? 'bg-[#C93B2B] text-white border-[#E04535]'
+                            : 'bg-[#658B1E] text-white border-[#88B82E]'
+                        }`}
+                      >
+                        {sfxMuted ? 'OFF' : 'ON'}
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={sfxMuted ? 0 : sfxVolume}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setSfxVolume(val);
+                      setSfxMuted(val === 0);
+                      soundFX.setSfxVolume(val / 100);
+                    }}
+                    onMouseUp={() => {
+                      if (!sfxMuted && sfxVolume > 0) soundFX.playEquip();
+                    }}
+                    className="w-full accent-[#88B82E] cursor-pointer"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    onClick={() => setShowPauseOptions(false)}
+                    className="w-full py-2.5 rounded bg-[#658B1E] hover:bg-[#76A124] text-white font-semibold text-sm border border-[#84B034] cursor-pointer"
+                  >
+                    Kembali ke Menu
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Save Slots inside Pause Menu */}
+                <div className="text-left space-y-2">
+                  <div className="text-xs font-mono-code font-bold text-[#E2E8F0]">
+                    PILIH SLOT SAVE GAME:
+                  </div>
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                    {(['slot_1', 'slot_2', 'slot_3'] as const).map((slotKey) => {
+                      const slot = saveSlots[slotKey];
+                      const slotLabel = `Save Slot ${slotKey.replace('slot_', '')}`;
+                      const isConfirmingOverwrite = confirmOverwriteSlot === slotKey;
+                      const unlockedCount = slot?.techProgress
+                        ? Object.values(slot.techProgress).reduce(
+                            (acc, cur) => acc + (cur.level || (cur.unlocked ? 1 : 0)),
+                            0
+                          )
+                        : 0;
+
+                      return (
+                        <div
+                          key={slotKey}
+                          className="flex items-center justify-between gap-2 rounded border border-[#454A4F] bg-[#2D3033] px-3 py-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono-code text-xs font-bold text-white">
+                                {slotLabel}
+                              </span>
+                              {slot && (
+                                <span className="text-[10px] font-mono-code text-[#9CD03B]">
+                                  {slot.savedAt}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-mono-code text-[#B8BFC6] truncate">
+                              {slot
+                                ? `Pulau ${slot.tiles?.length || 4}x${slot.tiles?.length || 4} · Tech Lv.${unlockedCount} · Wheat ${slot.warehouse?.jerami ?? 0} · Carrot ${slot.warehouse?.wortel ?? 0} · Wood ${slot.warehouse?.kayu ?? 0} · Corn ${slot.warehouse?.jagung ?? 0}`
+                                : 'Slot Kosong'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isConfirmingOverwrite ? (
+                              <>
+                                <button
+                                  onClick={() => saveGameToSlot(slotKey, slotLabel)}
+                                  className="px-2 py-1 rounded bg-[#C93B2B] hover:bg-[#E04535] text-white font-mono-code text-[11px] font-bold cursor-pointer"
+                                  title="Konfirmasi Timpa Save Slot Ini"
+                                >
+                                  Timpa!
+                                </button>
+                                <button
+                                  onClick={() => setConfirmOverwriteSlot(null)}
+                                  className="px-2 py-1 rounded bg-[#3B4045] hover:bg-[#4E555B] text-[#E2E8F0] font-mono-code text-[11px] cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {slot && (
+                                  <button
+                                    onClick={() => loadGameFromSlot(slotKey)}
+                                    className="px-2.5 py-1 rounded bg-[#658B1E] hover:bg-[#76A124] text-white font-mono-code text-xs font-bold border border-[#88B82E] cursor-pointer"
+                                  >
+                                    Muat
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    if (slot) {
+                                      setConfirmOverwriteSlot(slotKey);
+                                    } else {
+                                      saveGameToSlot(slotKey, slotLabel);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded bg-[#3B4045] hover:bg-[#4E555B] text-white font-mono-code text-xs font-bold border border-[#5D646B] cursor-pointer"
+                                >
+                                  Simpan
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setConfirmOverwriteSlot(null);
+                      setShowPauseOptions(false);
+                      setScreen('playing');
+                    }}
+                    className="w-full py-2.5 rounded bg-[#658B1E] hover:bg-[#76A124] text-white font-semibold text-sm border border-[#84B034] cursor-pointer"
+                  >
+                    Lanjutkan Bermain (Esc)
+                  </button>
+                  <button
+                    onClick={() => setShowPauseOptions(true)}
+                    className="w-full py-2 rounded bg-[#34383C] hover:bg-[#43484D] text-white font-mono-code font-bold text-xs border border-[#555B61] cursor-pointer"
+                  >
+                    OPTION
+                  </button>
+                  <button
+                    onClick={() => {
+                      stopPythonExecution();
+                      const expandLv =
+                        techNodes.find((n) => n.id === 'logistik_ekspansi')?.level ?? 0;
+                      const irLv = getNodeLevel('logistik_irigasi');
+                      const resetGrid = createInitialGrid(getIslandSizeForLevel(expandLv), irLv);
+                      tilesRef.current = resetGrid;
+                      setTiles(resetGrid);
+                      setTractor((t) => {
+                        const next = {
+                          ...t,
+                          x: 1,
+                          z: 1,
+                          direction: 'selatan' as const,
+                          fuel: t.maxFuel,
+                        };
+                        tractorRef.current = next;
+                        return next;
+                      });
+                      setConfirmOverwriteSlot(null);
+                      setShowPauseOptions(false);
+                      setScreen('playing');
+                    }}
+                    className="w-full py-2 rounded bg-[#34383C] hover:bg-[#43484D] text-white font-semibold text-xs cursor-pointer"
+                  >
+                    Reset Posisi Traktor & Ladang
+                  </button>
+                  <button
+                    onClick={() => {
+                      stopPythonExecution();
+                      setConfirmOverwriteSlot(null);
+                      setShowPauseOptions(false);
+                      setShowMainMenuSlots(false);
+                      setShowMainMenuOptions(false);
+                      setScreen('title');
+                    }}
+                    className="w-full py-2.5 rounded bg-[#2B2E31] hover:bg-[#383C40] text-[#E2E8F0] font-semibold text-sm border border-[#52565A] cursor-pointer"
+                  >
+                    Kembali ke Main Menu
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
