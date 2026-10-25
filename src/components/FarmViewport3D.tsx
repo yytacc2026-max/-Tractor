@@ -483,10 +483,12 @@ export const FarmViewport3D: React.FC<FarmViewport3DProps> = ({
       const size = grid.length;
       const offset = (size - 1) / 2;
 
-      // Auto-adjust camera distance when island expands so larger island fits in view
+      // Auto-adjust camera distance when island size changes (expansion, load game, or new game)
       if (size !== lastGridSize) {
-        const growthRatio = size / lastGridSize;
-        camera.position.multiplyScalar(Math.min(1.35, Math.max(1.08, growthRatio * 0.92)));
+        const baseDist = 11.5 * (1 + (size - 4) * 0.16);
+        const currentLen = Math.max(1, camera.position.length());
+        const targetLen = Math.sqrt(2) * baseDist;
+        camera.position.multiplyScalar(targetLen / currentLen);
         lastGridSize = size;
       }
 

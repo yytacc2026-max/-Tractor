@@ -96,6 +96,11 @@ export interface ScriptTab {
   id: string;
   name: string;
   code: string;
+  isOpen?: boolean;
+  isMinimized?: boolean;
+  x?: number;
+  y?: number;
+  zIndex?: number;
 }
 
 export interface ConsoleLogEntry {

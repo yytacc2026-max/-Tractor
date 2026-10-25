@@ -19,6 +19,7 @@ export interface ExecutionContext {
   measureCrop: (tractorIdx?: number) => number;
   getElapsedTime: () => number;
   isNodeUnlocked: (nodeId: string) => boolean;
+  getScriptCodeByName?: (scriptName: string) => string | null;
 
   // Async Actions (each awaits simulation tick)
   setActiveTractorIndex: (idx: number) => void;
@@ -161,9 +162,20 @@ export class AgroPythonInterpreter {
         );
       }
 
-      // 1. import random
-      if (text.startsWith('import random')) {
-        this.checkSyntaxUnlock('kode_random', 'import random', lineNumber);
+      // 1. import random or import <script_window_name>
+      if (text.startsWith('import ')) {
+        const importedName = text.slice(7).trim();
+        if (importedName === 'random') {
+          this.checkSyntaxUnlock('kode_random', 'import random', lineNumber);
+        } else if (this.ctx.getScriptCodeByName) {
+          const extCode = this.ctx.getScriptCodeByName(importedName);
+          if (extCode !== null) {
+            const extLines = this.preprocessLines(extCode);
+            await this.runBlock(extLines, 0, extLines.length);
+          } else {
+            throw new Error(`Line ${lineNumber}: No script window named '${importedName}' found.`);
+          }
+        }
         i++;
         continue;
       }
@@ -386,9 +398,10 @@ export class AgroPythonInterpreter {
       rawArgs.length > 0 ? this.splitArgs(rawArgs).map((a) => this.evalExpr(a, line)) : [];
 
     const fnName = rawName.replace(/^(tractor|traktor)\./, '');
+    const shortFnName = fnName.includes('.') ? fnName.split('.').pop()! : fnName;
 
-    if (this.functions[fnName]) {
-      const fnDef = this.functions[fnName];
+    if (this.functions[fnName] || this.functions[shortFnName]) {
+      const fnDef = this.functions[fnName] || this.functions[shortFnName];
       const prevVars = { ...this.variables };
       fnDef.params.forEach((p, idx) => {
         this.variables[p] = args[idx];

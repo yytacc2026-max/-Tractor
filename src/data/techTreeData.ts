@@ -514,6 +514,11 @@ export const INITIAL_SCRIPTS: ScriptTab[] = [
   {
     id: 'main',
     name: 'main',
+    isOpen: true,
+    isMinimized: false,
+    x: 20,
+    y: 80,
+    zIndex: 32,
     code: `# Press Play (▶) or Step (▷) to run Python code
 harvest()
 plow()
@@ -525,6 +530,11 @@ turn("right")
   {
     id: 'auto_farm',
     name: 'auto_farm',
+    isOpen: true,
+    isMinimized: true,
+    x: 20,
+    y: 448,
+    zIndex: 31,
     code: `# Continuous loop automation
 while True:
     if tractor.fuel < 25:
@@ -548,6 +558,11 @@ while True:
   {
     id: 'multi_tractor',
     name: 'multi_tractor',
+    isOpen: true,
+    isMinimized: true,
+    x: 20,
+    y: 492,
+    zIndex: 30,
     code: `# Control multiple tractors using Python code (Unlock 'Armada Multi-Traktor')
 for i in range(num_tractors()):
     use_tractor(i)

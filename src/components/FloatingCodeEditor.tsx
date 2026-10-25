@@ -6,15 +6,21 @@ interface FloatingCodeEditorProps {
   onClose: () => void;
   scripts: ScriptTab[];
   activeScriptId: string;
+  runningScriptId: string | null;
+  newlyCreatedId?: string | null;
+  onClearNewlyCreated?: () => void;
   onSelectScript: (id: string) => void;
-  onUpdateCode: (code: string) => void;
+  onUpdateCode: (id: string, code: string) => void;
   onAddScript: (customName?: string) => string;
   onRenameScript: (id: string, newName: string) => void;
+  onToggleMinimizeScript: (id: string) => void;
+  onCloseScriptWindow: (id: string) => void;
+  onMoveScriptWindow: (id: string, x: number, y: number) => void;
   isRunning: boolean;
   isStepWaiting: boolean;
   activeLine: number | null;
-  onRun: () => void;
-  onStep: () => void;
+  onRun: (scriptId: string) => void;
+  onStep: (scriptId: string) => void;
   onStop: () => void;
   logs: ConsoleLogEntry[];
   onClearLogs: () => void;
@@ -30,39 +36,62 @@ const QUICK_SNIPPETS = [
   { label: 'harvest()', snippet: 'harvest()\n' },
   { label: 'while True:', snippet: 'while True:\n    ' },
   { label: 'if can_harvest():', snippet: 'if can_harvest():\n    harvest()\n' },
-  { label: 'refuel check', snippet: 'if tractor.fuel < 25:\n    tractor.go_to_fuel()\n    tractor.refuel()\n' },
 ];
 
-export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
-  isOpen,
-  onClose,
-  scripts,
-  activeScriptId,
-  onSelectScript,
-  onUpdateCode,
-  onAddScript,
-  onRenameScript,
-  isRunning,
+interface SingleWindowProps {
+  script: ScriptTab;
+  isActive: boolean;
+  isThisRunning: boolean;
+  isStepWaiting: boolean;
+  activeLine: number | null;
+  autoFocusRename: boolean;
+  onClearAutoFocusRename?: () => void;
+  onFocusWindow: () => void;
+  onUpdateCode: (code: string) => void;
+  onRename: (newName: string) => void;
+  onAddNewPopup: () => void;
+  onToggleMinimize: () => void;
+  onCloseWindow: () => void;
+  onMoveWindow: (x: number, y: number) => void;
+  onRunThis: () => void;
+  onStepThis: () => void;
+  onStop: () => void;
+  logs: ConsoleLogEntry[];
+  onClearLogs: () => void;
+  executionSpeed: number;
+  onChangeSpeed: (speed: number) => void;
+}
+
+const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
+  script,
+  isActive,
+  isThisRunning,
   isStepWaiting,
   activeLine,
-  onRun,
-  onStep,
+  autoFocusRename,
+  onClearAutoFocusRename,
+  onFocusWindow,
+  onUpdateCode,
+  onRename,
+  onAddNewPopup,
+  onToggleMinimize,
+  onCloseWindow,
+  onMoveWindow,
+  onRunThis,
+  onStepThis,
   onStop,
   logs,
   onClearLogs,
   executionSpeed,
   onChangeSpeed,
 }) => {
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [showConsole, setShowConsole] = useState(true);
-  const [editingTabId, setEditingTabId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState<string>('');
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(script.name);
+  const [showConsole, setShowConsole] = useState(false);
 
-  const [position, setPosition] = useState<{ x: number; y: number }>({
-    x: Math.max(20, typeof window !== 'undefined' ? Math.floor(window.innerWidth * 0.5 - 270) : 280),
-    y: Math.max(80, typeof window !== 'undefined' ? window.innerHeight - 310 : 420),
-  });
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
 
   const dragRef = useRef<{
     dragging: boolean;
@@ -74,31 +103,33 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
     dragging: false,
     startX: 0,
     startY: 0,
-    origX: 0,
-    origY: 0,
+    origX: script.x ?? 24,
+    origY: script.y ?? 80,
   });
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const gutterRef = useRef<HTMLDivElement | null>(null);
-
-  const activeScript = scripts.find((s) => s.id === activeScriptId) || scripts[0];
-  const codeLines = activeScript.code.split('\n');
+  useEffect(() => {
+    if (autoFocusRename) {
+      setIsEditingName(true);
+      setNameDraft(script.name);
+      onClearAutoFocusRename?.();
+    }
+  }, [autoFocusRename, onClearAutoFocusRename, script.name]);
 
   useEffect(() => {
-    if (editingTabId && renameInputRef.current) {
-      renameInputRef.current.focus();
-      renameInputRef.current.select();
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
     }
-  }, [editingTabId]);
+  }, [isEditingName]);
 
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       if (!dragRef.current.dragging) return;
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
-      const nextX = Math.max(8, Math.min(window.innerWidth - 320, dragRef.current.origX + dx));
-      const nextY = Math.max(52, Math.min(window.innerHeight - 60, dragRef.current.origY + dy));
-      setPosition({ x: nextX, y: nextY });
+      const nextX = Math.max(8, Math.min(window.innerWidth - 220, dragRef.current.origX + dx));
+      const nextY = Math.max(46, Math.min(window.innerHeight - 44, dragRef.current.origY + dy));
+      onMoveWindow(nextX, nextY);
     };
 
     const handlePointerUp = () => {
@@ -111,28 +142,20 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, []);
+  }, [onMoveWindow]);
 
-  if (!isOpen) return null;
-
-  const commitRename = () => {
-    if (editingTabId) {
-      const cleaned = editingName.trim();
-      if (cleaned.length > 0) {
-        onRenameScript(editingTabId, cleaned);
-      }
-      setEditingTabId(null);
+  const commitName = () => {
+    const cleaned = nameDraft.trim();
+    if (cleaned.length > 0) {
+      onRename(cleaned);
+    } else {
+      setNameDraft(script.name);
     }
-  };
-
-  const handleCreateAndRenameScript = () => {
-    const newId = onAddScript();
-    const defaultName = `script_${scripts.length + 1}`;
-    setEditingTabId(newId);
-    setEditingName(defaultName);
+    setIsEditingName(false);
   };
 
   const handleHeaderPointerDown = (e: React.PointerEvent) => {
+    onFocusWindow();
     if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
       return;
     }
@@ -140,20 +163,20 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
       dragging: true,
       startX: e.clientX,
       startY: e.clientY,
-      origX: position.x,
-      origY: position.y,
+      origX: script.x ?? 24,
+      origY: script.y ?? 80,
     };
   };
 
   const handleInsertSnippet = (snippet: string) => {
     const ta = textareaRef.current;
     if (!ta) {
-      onUpdateCode(activeScript.code + snippet);
+      onUpdateCode(script.code + snippet);
       return;
     }
-    const start = ta.selectionStart ?? activeScript.code.length;
-    const end = ta.selectionEnd ?? activeScript.code.length;
-    const nextCode = activeScript.code.slice(0, start) + snippet + activeScript.code.slice(end);
+    const start = ta.selectionStart ?? script.code.length;
+    const end = ta.selectionEnd ?? script.code.length;
+    const nextCode = script.code.slice(0, start) + snippet + script.code.slice(end);
     onUpdateCode(nextCode);
     setTimeout(() => {
       ta.focus();
@@ -174,27 +197,40 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
     }
   };
 
+  const codeLines = script.code.split('\n');
+  const posX = script.x ?? 24;
+  const posY = script.y ?? 80;
+  const isMinimized = Boolean(script.isMinimized);
+
   return (
     <div
+      onPointerDown={onFocusWindow}
       style={{
-        transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+        transform: `translate3d(${posX}px, ${posY}px, 0)`,
+        zIndex: script.zIndex ?? (isActive ? 38 : 30),
       }}
-      className="fixed top-0 left-0 z-30 w-[560px] max-w-[95vw] pointer-events-auto rounded-md border border-[#52565A] bg-[#232527] shadow-2xl"
+      className={`fixed top-0 left-0 pointer-events-auto rounded-[4px] border transition-shadow ${
+        isMinimized ? 'w-[280px]' : 'w-[420px] max-w-[92vw]'
+      } ${
+        isActive
+          ? 'border-[#84B034] shadow-[0_12px_32px_rgba(0,0,0,0.65)]'
+          : 'border-[#55595E] shadow-[0_6px_20px_rgba(0,0,0,0.45)]'
+      } bg-[#212325]`}
     >
-      {/* Window Header */}
+      {/* Window Header — Styled Directly After Reference Screenshot (Play, Step, Script Title, +, -, x) */}
       <div
         onPointerDown={handleHeaderPointerDown}
-        className="flex items-center justify-between gap-2 px-2.5 py-2 bg-[#474A4D] border-b border-[#5A5E62] cursor-move rounded-t-md select-none"
+        className="flex items-center justify-between gap-2 px-2 py-1.5 bg-[#525558] border-b border-[#64686C] cursor-move rounded-t-[3px] select-none"
       >
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          {/* Play / Run Button */}
-          {!isRunning || isStepWaiting ? (
+          {/* Play / Stop Button */}
+          {!isThisRunning || isStepWaiting ? (
             <button
-              onClick={onRun}
-              title="Run Python Script (Play)"
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white transition-transform shrink-0 border border-[#84B034]"
+              onClick={onRunThis}
+              title={`Run '${script.name}' (Play)`}
+              className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white transition-transform shrink-0 border border-[#84B034] cursor-pointer"
             >
-              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
                 <path d="M8 5v14l11-7z" />
               </svg>
             </button>
@@ -202,9 +238,9 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
             <button
               onClick={onStop}
               title="Stop Execution"
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#C94A38] hover:bg-[#DF5643] active:scale-95 text-white transition-transform shrink-0 border border-[#E57365]"
+              className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#C94A38] hover:bg-[#DF5643] active:scale-95 text-white transition-transform shrink-0 border border-[#E57365] cursor-pointer"
             >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current">
                 <rect x="6" y="6" width="12" height="12" />
               </svg>
             </button>
@@ -212,114 +248,91 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
 
           {/* Step Button */}
           <button
-            onClick={onStep}
-            title="Step 1 Line"
-            className="w-7 h-7 flex items-center justify-center rounded bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white transition-transform shrink-0 border border-[#84B034]"
+            onClick={onStepThis}
+            title={`Step 1 Line in '${script.name}'`}
+            className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white transition-transform shrink-0 border border-[#84B034] cursor-pointer"
           >
-            <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-none stroke-current stroke-2">
               <polygon points="8,5 19,12 8,19" />
             </svg>
           </button>
 
-          {/* Script File Tabs (`main`, etc.) with Inline Rename */}
-          <div className="flex items-center gap-1 ml-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {scripts.map((tab) => {
-              const isEditingThis = editingTabId === tab.id;
-              const isActive = tab.id === activeScript.id;
-
-              if (isEditingThis) {
-                return (
-                  <input
-                    key={tab.id}
-                    ref={renameInputRef}
-                    type="text"
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onBlur={commitRename}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitRename();
-                      } else if (e.key === 'Escape') {
-                        setEditingTabId(null);
-                      }
-                    }}
-                    className="w-28 px-2 py-0.5 text-xs font-mono-code rounded bg-[#181A1C] text-white border border-[#9CD03B] focus:outline-none shrink-0"
-                  />
-                );
-              }
-
-              return (
-                <div key={tab.id} className="flex items-center shrink-0">
-                  <button
-                    onClick={() => onSelectScript(tab.id)}
-                    onDoubleClick={() => {
-                      setEditingTabId(tab.id);
-                      setEditingName(tab.name);
-                    }}
-                    title="Klik untuk buka · Klik 2x untuk ganti nama script"
-                    className={`px-2.5 py-1 text-xs font-mono-code rounded transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
-                      isActive
-                        ? 'bg-[#232527] text-white font-semibold border border-[#658B1E]'
-                        : 'text-[#D0D4D8] hover:bg-[#36393C]'
-                    }`}
-                  >
-                    <span>{tab.name}</span>
-                    {isActive && (
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingTabId(tab.id);
-                          setEditingName(tab.name);
-                        }}
-                        title="Ganti nama script"
-                        className="text-[10px] text-[#9DA5AE] hover:text-[#A8E040] px-0.5 cursor-pointer"
-                      >
-                        ✎
-                      </span>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
+          {/* Editable Script Window Title (Matches Reference Image: PriorityFarming, Carrot, Grass, etc.) */}
+          {isEditingName ? (
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitName();
+                } else if (e.key === 'Escape') {
+                  setNameDraft(script.name);
+                  setIsEditingName(false);
+                }
+              }}
+              className="w-36 px-2 py-0.5 text-xs font-mono-code font-bold rounded bg-[#1D1F21] text-white border border-[#9CD03B] focus:outline-none"
+            />
+          ) : (
             <button
-              onClick={handleCreateAndRenameScript}
-              title="Tambah Script Baru (Langsung beri nama)"
-              className="px-2 py-0.5 text-xs font-mono-code rounded bg-[#36393C] hover:bg-[#658B1E] text-white transition-colors shrink-0 cursor-pointer"
+              onClick={() => {
+                setIsEditingName(true);
+                setNameDraft(script.name);
+              }}
+              title="Klik untuk mengganti nama script ini"
+              className="px-1.5 py-0.5 text-xs font-mono-code font-bold text-white hover:text-[#B8F252] truncate flex items-center gap-1 cursor-pointer"
             >
-              +
+              <span className="truncate">{script.name}</span>
+              <span className="text-[10px] text-white/60 hover:text-white">✎</span>
             </button>
-          </div>
+          )}
         </div>
 
-        {/* Right Window Controls (Speed, Minimize, Close) */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => onChangeSpeed(executionSpeed === 1 ? 2 : executionSpeed === 2 ? 4 : 1)}
-            title="Execution Speed"
-            className="px-2 h-7 text-xs font-mono-code rounded bg-[#333639] hover:bg-[#3F4347] text-[#E5A93C] border border-[#585C60] whitespace-nowrap shrink-0"
-          >
-            {executionSpeed}x
-          </button>
+        {/* Right Window Controls (+ New Pop-Up, Speed, - Minimize, x Close) */}
+        <div className="flex items-center gap-1 shrink-0">
+          {!isMinimized && (
+            <>
+              <button
+                onClick={onAddNewPopup}
+                title="Tambah Pop-Up Script Baru (+)"
+                className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#36393C] hover:bg-[#658B1E] text-white font-mono-code text-sm font-bold border border-[#6E7378] transition-colors cursor-pointer"
+              >
+                +
+              </button>
 
-          {/* Minimize Button */}
+              <button
+                onClick={() =>
+                  onChangeSpeed(executionSpeed === 1 ? 2 : executionSpeed === 2 ? 4 : 1)
+                }
+                title="Execution Speed"
+                className="px-1.5 h-6 text-[11px] font-mono-code rounded-[3px] bg-[#333639] hover:bg-[#3F4347] text-[#E5A93C] border border-[#585C60] whitespace-nowrap cursor-pointer"
+              >
+                {executionSpeed}x
+              </button>
+            </>
+          )}
+
+          {/* Minimize Button (-) */}
           <button
-            onClick={() => setIsMinimized(!isMinimized)}
-            title={isMinimized ? 'Expand Editor' : 'Minimize Editor'}
-            className="w-7 h-7 flex items-center justify-center rounded bg-[#658B1E] hover:bg-[#76A124] text-white transition-colors border border-[#84B034] shrink-0"
+            onClick={onToggleMinimize}
+            title={isMinimized ? 'Perbesar Pop-Up Editor' : 'Kecilkan Pop-Up Editor (-)'}
+            className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#658B1E] hover:bg-[#76A124] text-white transition-colors border border-[#84B034] cursor-pointer"
           >
-            <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-current stroke-[2.5]">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current stroke-[2.8]">
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
 
-          {/* Close Button */}
+          {/* Close Window Button (x) */}
           <button
-            onClick={onClose}
-            title="Close Editor (Reopen with + at top right)"
-            className="w-7 h-7 flex items-center justify-center rounded bg-[#658B1E] hover:bg-[#76A124] text-white transition-colors border border-[#84B034] shrink-0"
+            onClick={onCloseWindow}
+            title="Tutup Pop-Up Script (x)"
+            className="w-6 h-6 flex items-center justify-center rounded-[3px] bg-[#658B1E] hover:bg-[#C93B2B] text-white transition-colors border border-[#84B034] cursor-pointer"
           >
-            <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-current stroke-[2.5]">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current stroke-[2.8]">
               <line x1="6" y1="6" x2="18" y2="18" />
               <line x1="18" y1="6" x2="6" y2="18" />
             </svg>
@@ -327,36 +340,37 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
         </div>
       </div>
 
+      {/* Expandable Code Body */}
       {!isMinimized && (
         <>
-          {/* Quick Touch/Click Python API Snippet Bar */}
-          <div className="flex items-center gap-1 px-2.5 py-1.5 bg-[#2A2D30] border-b border-[#3A3D40] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Quick Python Snippet Bar */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#2A2D30] border-b border-[#3A3D40] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {QUICK_SNIPPETS.map((item) => (
               <button
                 key={item.label}
                 onClick={() => handleInsertSnippet(item.snippet)}
-                className="px-2 py-0.5 text-[11px] font-mono-code rounded bg-[#363A3E] hover:bg-[#658B1E] text-[#E8ECEF] transition-colors whitespace-nowrap shrink-0"
+                className="px-1.5 py-0.5 text-[10px] font-mono-code rounded bg-[#363A3E] hover:bg-[#658B1E] text-[#E8ECEF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 {item.label}
               </button>
             ))}
           </div>
 
-          {/* Code Editor Body with Line Gutter & Active Line Highlight */}
-          <div className="relative flex h-44 bg-[#252729]">
+          {/* Code Editor Area */}
+          <div className="relative flex h-48 bg-[#212325]">
             {/* Line Number Gutter */}
             <div
               ref={gutterRef}
-              className="w-10 py-2.5 bg-[#1D1F21] border-r border-[#35383B] text-right pr-2 select-none overflow-hidden font-mono-code text-xs text-[#757B82] leading-5"
+              className="w-8 py-2 bg-[#1A1C1E] border-r border-[#323538] text-right pr-1.5 select-none overflow-hidden font-mono-code text-[11px] text-[#6E747B] leading-5"
             >
               {codeLines.map((_, idx) => {
                 const ln = idx + 1;
-                const isAct = activeLine === ln;
+                const isAct = isThisRunning && activeLine === ln;
                 return (
                   <div
                     key={ln}
                     className={`h-5 ${
-                      isAct ? 'text-[#A8E040] font-bold bg-[#658B1E]/30 -mr-2 pr-2' : ''
+                      isAct ? 'text-[#A8E040] font-bold bg-[#658B1E]/30 -mr-1.5 pr-1.5' : ''
                     }`}
                   >
                     {ln}
@@ -365,12 +379,14 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
               })}
             </div>
 
-            {/* Active Execution Line Highlight Bar */}
+            {/* Active Execution Line Highlight & Textarea */}
             <div className="relative flex-1 h-full overflow-hidden">
-              {activeLine !== null && (
+              {isThisRunning && activeLine !== null && (
                 <div
                   style={{
-                    transform: `translateY(${(activeLine - 1) * 20 + 10 - (textareaRef.current?.scrollTop || 0)}px)`,
+                    transform: `translateY(${
+                      (activeLine - 1) * 20 + 8 - (textareaRef.current?.scrollTop || 0)
+                    }px)`,
                   }}
                   className="pointer-events-none absolute left-0 right-0 h-5 bg-[#658B1E]/25 border-y border-[#84B034]/40 transition-transform duration-75"
                 />
@@ -378,7 +394,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
 
               <textarea
                 ref={textareaRef}
-                value={activeScript.code}
+                value={script.code}
                 onChange={(e) => onUpdateCode(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onScroll={handleScroll}
@@ -386,54 +402,42 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
                 autoCapitalize="off"
                 autoComplete="off"
                 placeholder="# Write Python code here..."
-                className="relative z-10 w-full h-full px-3 py-2.5 bg-transparent text-[#F1F3F5] font-mono-code text-xs leading-5 resize-none focus:outline-none overflow-y-auto"
+                className="relative z-10 w-full h-full px-2.5 py-2 bg-transparent text-[#F1F3F5] font-mono-code text-xs leading-5 resize-none focus:outline-none overflow-y-auto"
               />
             </div>
           </div>
 
-          {/* Footer / Console Output Drawer */}
-          <div className="border-t border-[#3A3D40] bg-[#1C1E20] rounded-b-md">
-            <div className="flex items-center justify-between px-3 py-1 text-[11px] text-[#A0A6AD]">
+          {/* Compact Console Drawer Footer */}
+          <div className="border-t border-[#36393D] bg-[#1A1C1E] rounded-b-[3px]">
+            <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-[#9BA1A8]">
               <button
                 onClick={() => setShowConsole(!showConsole)}
-                className="flex items-center gap-1.5 hover:text-white transition-colors whitespace-nowrap shrink-0"
+                className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
               >
-                <span>{showConsole ? '▾' : '▸'} Console Output ({logs.length})</span>
-                {activeLine !== null && (
-                  <span className="text-[#A8E040] font-mono-code">
-                    · Line {activeLine}
-                  </span>
+                <span>{showConsole ? '▾' : '▸'} Console ({logs.length})</span>
+                {isThisRunning && activeLine !== null && (
+                  <span className="text-[#A8E040] font-mono-code">· Line {activeLine}</span>
                 )}
               </button>
-              <div className="flex items-center gap-3">
-                {isRunning && (
-                  <button
-                    onClick={onStop}
-                    className="text-[#F07167] hover:underline font-medium whitespace-nowrap shrink-0"
-                  >
-                    Stop
-                  </button>
-                )}
+              {showConsole && (
                 <button
                   onClick={onClearLogs}
-                  className="hover:text-white transition-colors whitespace-nowrap shrink-0"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
                   Clear
                 </button>
-              </div>
+              )}
             </div>
 
             {showConsole && (
-              <div className="h-20 px-3 py-1.5 overflow-y-auto font-mono-code text-[11px] space-y-1 border-t border-[#2C2F33]">
+              <div className="h-16 px-2.5 py-1 overflow-y-auto font-mono-code text-[10px] space-y-0.5 border-t border-[#2A2D31]">
                 {logs.length === 0 ? (
-                  <div className="text-[#6C7278] italic">
-                    Ready. Click Play (▶) or Step (▷) to run Python code.
-                  </div>
+                  <div className="text-[#6C7278] italic">Ready.</div>
                 ) : (
-                  logs.map((entry) => (
+                  logs.slice(-15).map((entry) => (
                     <div
                       key={entry.id}
-                      className={`flex items-start gap-2 leading-4 ${
+                      className={`flex items-start gap-1.5 leading-4 ${
                         entry.type === 'error'
                           ? 'text-[#FF7B72]'
                           : entry.type === 'warn'
@@ -456,5 +460,66 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
         </>
       )}
     </div>
+  );
+};
+
+export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
+  isOpen,
+  scripts,
+  activeScriptId,
+  runningScriptId,
+  newlyCreatedId,
+  onClearNewlyCreated,
+  onSelectScript,
+  onUpdateCode,
+  onAddScript,
+  onRenameScript,
+  onToggleMinimizeScript,
+  onCloseScriptWindow,
+  onMoveScriptWindow,
+  isRunning,
+  isStepWaiting,
+  activeLine,
+  onRun,
+  onStep,
+  onStop,
+  logs,
+  onClearLogs,
+  executionSpeed,
+  onChangeSpeed,
+}) => {
+  if (!isOpen) return null;
+
+  const openWindows = scripts.filter((s) => s.isOpen !== false);
+
+  return (
+    <>
+      {openWindows.map((script) => (
+        <SingleFloatingScriptWindow
+          key={script.id}
+          script={script}
+          isActive={script.id === activeScriptId}
+          isThisRunning={isRunning && runningScriptId === script.id}
+          isStepWaiting={isStepWaiting && runningScriptId === script.id}
+          activeLine={runningScriptId === script.id ? activeLine : null}
+          autoFocusRename={newlyCreatedId === script.id}
+          onClearAutoFocusRename={onClearNewlyCreated}
+          onFocusWindow={() => onSelectScript(script.id)}
+          onUpdateCode={(newCode) => onUpdateCode(script.id, newCode)}
+          onRename={(newName) => onRenameScript(script.id, newName)}
+          onAddNewPopup={() => onAddScript()}
+          onToggleMinimize={() => onToggleMinimizeScript(script.id)}
+          onCloseWindow={() => onCloseScriptWindow(script.id)}
+          onMoveWindow={(nx, ny) => onMoveScriptWindow(script.id, nx, ny)}
+          onRunThis={() => onRun(script.id)}
+          onStepThis={() => onStep(script.id)}
+          onStop={onStop}
+          logs={logs}
+          onClearLogs={onClearLogs}
+          executionSpeed={executionSpeed}
+          onChangeSpeed={onChangeSpeed}
+        />
+      ))}
+    </>
   );
 };
