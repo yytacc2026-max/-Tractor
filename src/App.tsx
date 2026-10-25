@@ -1459,29 +1459,14 @@ export default function App() {
         <div className="fixed inset-0 z-40 flex flex-col items-center justify-center p-6 bg-black/35 pointer-events-auto">
           <div className="flex flex-col items-center text-center max-w-xl w-full">
             <svg
-              viewBox="0 0 540 110"
-              className="w-full max-w-[460px] h-auto drop-shadow-lg"
+              viewBox="0 0 440 105"
+              className="w-full max-w-[380px] h-auto drop-shadow-lg"
               aria-label="этаTractor"
             >
-              <rect
-                x="14"
-                y="16"
-                width="78"
-                height="78"
-                rx="12"
-                fill="#658B1E"
-                stroke="#9CD03B"
-                strokeWidth="3"
-              />
-              <path
-                d="M34 66 H72 L68 44 H52 V34 H42 V44 H34 Z"
-                fill="#F3F5F4"
-              />
-              <circle cx="42" cy="68" r="10" fill="#232527" stroke="#E5A93C" strokeWidth="4" />
-              <circle cx="64" cy="70" r="7" fill="#232527" stroke="#E5A93C" strokeWidth="3" />
               <text
-                x="110"
-                y="68"
+                x="220"
+                y="62"
+                textAnchor="middle"
                 fill="#FFFFFF"
                 fontFamily="Outfit, sans-serif"
                 fontWeight="700"
@@ -1491,8 +1476,9 @@ export default function App() {
                 этаTractor
               </text>
               <text
-                x="112"
-                y="92"
+                x="220"
+                y="88"
+                textAnchor="middle"
                 fill="#E5A93C"
                 fontFamily="JetBrains Mono, monospace"
                 fontWeight="600"

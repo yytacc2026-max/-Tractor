@@ -664,14 +664,11 @@ export const ApiDocsModal: React.FC<ApiDocsModalProps> = ({
   onClose,
   onLoadSnippet,
 }) => {
-  const [activeTab, setActiveTab] = useState<'all' | 'basic' | 'multi' | 'auto' | 'api'>('all');
-
   if (!isOpen) return null;
 
   const tutorials = [
     {
       id: 'tut-multi-12',
-      category: 'multi' as const,
       badge: 'MULTI-TRAKTOR (TRAKTOR 1 & 2)',
       badgeColor: 'bg-[#2B6CB0] text-white',
       title: '1. Cara Menggerakkan Traktor 1 & Traktor 2 Secara Bersamaan (tractors[0] & tractors[1])',
@@ -710,7 +707,6 @@ while True:
     },
     {
       id: 'tut-multi-zone',
-      category: 'multi' as const,
       badge: 'MULTI-TRAKTOR ZONA KOORDINAT',
       badgeColor: 'bg-[#2B6CB0] text-white',
       title: '2. Pembagian Tugas Traktor 1 & Traktor 2 dengan Koordinat goto(x, z)',
@@ -742,7 +738,6 @@ while True:
     },
     {
       id: 'tut-multi-all',
-      category: 'multi' as const,
       badge: 'ARMADA 1-4 TRAKTOR',
       badgeColor: 'bg-[#2B6CB0] text-white',
       title: '3. Mengendalikan Seluruh Armada (Hingga 4 Traktor) dengan use_tractor(i)',
@@ -772,7 +767,6 @@ while True:
     },
     {
       id: 'tut-basic-1',
-      category: 'basic' as const,
       badge: 'DASAR PEMULA',
       badgeColor: 'bg-[#658B1E] text-white',
       title: '4. Tutorial Dasar: Gerak, Belok, Bajak, Tanam & Panen Pertama',
@@ -794,7 +788,6 @@ plant("wheat")`,
     },
     {
       id: 'tut-auto-scan',
-      category: 'auto' as const,
       badge: 'OTOMATISASI PULAU',
       badgeColor: 'bg-[#9B51E0] text-white',
       title: '5. Sapu Bersih Seluruh Pulau Ladang (Full Grid Automation)',
@@ -826,7 +819,6 @@ while True:
     },
     {
       id: 'tut-auto-crops',
-      category: 'auto' as const,
       badge: 'MULTI-KOMODITAS & PUPUK',
       badgeColor: 'bg-[#D97706] text-white',
       title: '6. Menanam Wheat, Carrot, Wood & Corn + Pupuk Instan fertilize()',
@@ -860,7 +852,6 @@ while True:
     },
     {
       id: 'tut-multi-window',
-      category: 'basic' as const,
       badge: 'MULTI POP-UP SCRIPT',
       badgeColor: 'bg-[#0D9488] text-white',
       title: '7. Cara Menggunakan Banyak Pop-Up Script (+) & Fungsi def',
@@ -886,11 +877,6 @@ while True:
     },
   ];
 
-  const filteredTutorials =
-    activeTab === 'all'
-      ? tutorials
-      : tutorials.filter((t) => t.category === activeTab);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 pointer-events-auto">
       <div className="w-full max-w-4xl rounded-lg border-2 border-[#52565A] bg-[#232527] text-[#F3F5F4] shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
@@ -913,150 +899,123 @@ while True:
           </button>
         </div>
 
-        {/* Category Filter Bar */}
-        <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-[#2A2D30] border-b border-[#3E4246] shrink-0">
-          {[
-            { id: 'all', label: 'Semua Tutorial (7)' },
-            { id: 'multi', label: '🚜 Traktor 1 & 2 Bersamaan' },
-            { id: 'basic', label: '🌱 Dasar & Fungsi def' },
-            { id: 'auto', label: '⚡ Otomatisasi & Multi-Tanaman' },
-            { id: 'api', label: '📖 Kamus Fungsi Python' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded font-mono-code text-xs font-bold transition-colors cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-[#658B1E] text-white border border-[#9CD03B]'
-                  : 'bg-[#1C1E20] hover:bg-[#34383C] text-[#C4CAD0] border border-[#3E4246]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Scrollable Content */}
+        {/* Unified Scrollable Content (All Tutorials & Python Dictionary Combined) */}
         <div className="p-6 overflow-y-auto space-y-6 text-xs leading-relaxed">
-          {/* Quick API Cheat Sheet (Shown on 'all' and 'api' tabs) */}
-          {(activeTab === 'all' || activeTab === 'api') && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-display font-bold text-white flex items-center gap-2">
-                <span>Kamus Cepat Perintah Python (English API)</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#A8E040] font-semibold">
-                    move(steps) · turn(dir) · goto(x, z)
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Menggerakkan traktor maju <code className="text-white">move(1)</code>, berbelok (<code className="text-white">"right"</code>,{' '}
-                    <code className="text-white">"left"</code>, <code className="text-white">"north"</code>, <code className="text-white">"south"</code>, <code className="text-white">"east"</code>, <code className="text-white">"west"</code>), atau langsung menuju koordinat <code className="text-white">goto(x, z)</code>.
-                  </p>
+          {/* Quick API Cheat Sheet */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-display font-bold text-white flex items-center gap-2">
+              <span>Kamus Cepat Perintah Python (English API)</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#A8E040] font-semibold">
+                  move(steps) · turn(dir) · goto(x, z)
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Menggerakkan traktor maju <code className="text-white">move(1)</code>, berbelok (<code className="text-white">"right"</code>,{' '}
+                  <code className="text-white">"left"</code>, <code className="text-white">"north"</code>, <code className="text-white">"south"</code>, <code className="text-white">"east"</code>, <code className="text-white">"west"</code>), atau langsung menuju koordinat <code className="text-white">goto(x, z)</code>.
+                </p>
+              </div>
 
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#A8E040] font-semibold">
-                    plow() · plant(seed) · fertilize() · harvest()
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Membajak tanah, menanam bibit (<code className="text-white">"wheat"</code>,{' '}
-                    <code className="text-white">"carrot"</code>, <code className="text-white">"wood"</code>,{' '}
-                    <code className="text-white">"corn"</code>), memberi pupuk instan <code className="text-white">fertilize()</code>, dan memanen.
-                  </p>
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#A8E040] font-semibold">
+                  plow() · plant(seed) · fertilize() · harvest()
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Membajak tanah, menanam bibit (<code className="text-white">"wheat"</code>,{' '}
+                  <code className="text-white">"carrot"</code>, <code className="text-white">"wood"</code>,{' '}
+                  <code className="text-white">"corn"</code>), memberi pupuk instan <code className="text-white">fertilize()</code>, dan memanen.
+                </p>
+              </div>
 
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#E5A93C] font-semibold">
-                    tractors[0] · tractors[1] · use_tractor(i) · num_tractors()
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Mengendalikan beberapa traktor sekaligus! Panggil <code className="text-white">tractors[0].move(1)</code> untuk Traktor 1 dan{' '}
-                    <code className="text-white">tractors[1].move(1)</code> untuk Traktor 2, atau gunakan <code className="text-white">use_tractor(i)</code>.
-                  </p>
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#E5A93C] font-semibold">
+                  tractors[0] · tractors[1] · use_tractor(i) · num_tractors()
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Mengendalikan beberapa traktor sekaligus! Panggil <code className="text-white">tractors[0].move(1)</code> untuk Traktor 1 dan{' '}
+                  <code className="text-white">tractors[1].move(1)</code> untuk Traktor 2, atau gunakan <code className="text-white">use_tractor(i)</code>.
+                </p>
+              </div>
 
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#A5D6FF] font-semibold">
-                    can_harvest() · check_soil() · measure() · get_world_size()
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Mengecek apakah tanaman siap panen (<code className="text-white">can_harvest()</code>), kondisi tanah (<code className="text-white">"wild"</code>, <code className="text-white">"plowed"</code>, <code className="text-white">"planted"</code>, <code className="text-white">"ready"</code>), persentase tumbuh (<code className="text-white">measure()</code>), dan ukuran pulau.
-                  </p>
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#A5D6FF] font-semibold">
+                  can_harvest() · check_soil() · measure() · get_world_size()
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Mengecek apakah tanaman siap panen (<code className="text-white">can_harvest()</code>), kondisi tanah (<code className="text-white">"wild"</code>, <code className="text-white">"plowed"</code>, <code className="text-white">"planted"</code>, <code className="text-white">"ready"</code>), persentase tumbuh (<code className="text-white">measure()</code>), dan ukuran pulau.
+                </p>
+              </div>
 
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#FF9B93] font-semibold">
-                    go_to_fuel() · refuel() · go_to_barn() · deliver()
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Menuju Pom Bensin di <code className="text-white">(0, 0)</code> untuk isi solar <code className="text-white">refuel()</code>, atau menuju Gudang Barn untuk menyimpan kargo <code className="text-white">deliver()</code>.
-                  </p>
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#FF9B93] font-semibold">
+                  go_to_fuel() · refuel() · go_to_barn() · deliver()
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Menuju Pom Bensin di <code className="text-white">(0, 0)</code> untuk isi solar <code className="text-white">refuel()</code>, atau menuju Gudang Barn untuk menyimpan kargo <code className="text-white">deliver()</code>.
+                </p>
+              </div>
 
-                <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
-                  <div className="font-mono-code text-[#D2A8FF] font-semibold">
-                    get_pos_x() · get_pos_z() · set_speed(n) · clear()
-                  </div>
-                  <p className="text-[#C4CAD0] mt-1">
-                    Membaca posisi X/Z traktor saat ini, mempercepat simulasi (<code className="text-white">set_speed(3)</code>), atau mereset ladang (<code className="text-white">clear()</code>).
-                  </p>
+              <div className="p-3.5 rounded bg-[#1C1E20] border border-[#383C40]">
+                <div className="font-mono-code text-[#D2A8FF] font-semibold">
+                  get_pos_x() · get_pos_z() · set_speed(n) · clear()
                 </div>
+                <p className="text-[#C4CAD0] mt-1">
+                  Membaca posisi X/Z traktor saat ini, mempercepat simulasi (<code className="text-white">set_speed(3)</code>), atau mereset ladang (<code className="text-white">clear()</code>).
+                </p>
               </div>
             </div>
-          )}
+          </div>
 
           {/* Step-by-Step Tutorials List */}
-          {activeTab !== 'api' && (
-            <div className="space-y-4">
-              <h3 className="text-sm font-display font-bold text-white">
-                Tutorial Langkah-demi-Langkah & Contoh Kode Siap Pakai
-              </h3>
-              {filteredTutorials.map((tut) => (
-                <div
-                  key={tut.id}
-                  className="p-4 rounded-lg bg-[#1C1E20] border border-[#3E4348] space-y-3 shadow-md"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1 flex-1 min-w-[240px]">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono-code font-bold ${tut.badgeColor}`}
-                      >
-                        {tut.badge}
-                      </span>
-                      <div className="text-sm font-bold text-white">{tut.title}</div>
-                      <p className="text-[#B8BFC6]">{tut.desc}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        onLoadSnippet(tut.code);
-                        onClose();
-                      }}
-                      className="px-3.5 py-2 rounded bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white font-mono-code text-xs font-bold border border-[#9CD03B] shadow whitespace-nowrap shrink-0 cursor-pointer"
+          <div className="space-y-4">
+            <h3 className="text-sm font-display font-bold text-white">
+              Semua Tutorial Langkah-demi-Langkah & Contoh Kode Siap Pakai
+            </h3>
+            {tutorials.map((tut) => (
+              <div
+                key={tut.id}
+                className="p-4 rounded-lg bg-[#1C1E20] border border-[#3E4348] space-y-3 shadow-md"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1 flex-1 min-w-[240px]">
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono-code font-bold ${tut.badgeColor}`}
                     >
-                      Load to Editor
-                    </button>
+                      {tut.badge}
+                    </span>
+                    <div className="text-sm font-bold text-white">{tut.title}</div>
+                    <p className="text-[#B8BFC6]">{tut.desc}</p>
                   </div>
-
-                  {/* Bullet Steps */}
-                  <div className="bg-[#232629] border border-[#34383C] rounded p-3 space-y-1">
-                    <div className="text-[11px] font-mono-code font-bold text-[#9CD03B]">
-                      Cara Kerja:
-                    </div>
-                    <ul className="list-disc list-inside space-y-1 text-[#D0D6DC] text-[11px]">
-                      {tut.steps.map((st, idx) => (
-                        <li key={idx}>{st}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <pre className="p-3.5 rounded bg-[#141618] border border-[#2E3236] text-[#D8DEE4] font-mono-code text-xs overflow-x-auto leading-relaxed">
-                    {tut.code}
-                  </pre>
+                  <button
+                    onClick={() => {
+                      onLoadSnippet(tut.code);
+                      onClose();
+                    }}
+                    className="px-3.5 py-2 rounded bg-[#658B1E] hover:bg-[#76A124] active:scale-95 text-white font-mono-code text-xs font-bold border border-[#9CD03B] shadow whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Load to Editor
+                  </button>
                 </div>
-              ))}
-            </div>
-          )}
+
+                {/* Bullet Steps */}
+                <div className="bg-[#232629] border border-[#34383C] rounded p-3 space-y-1">
+                  <div className="text-[11px] font-mono-code font-bold text-[#9CD03B]">
+                    Cara Kerja:
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[#D0D6DC] text-[11px]">
+                    {tut.steps.map((st, idx) => (
+                      <li key={idx}>{st}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <pre className="p-3.5 rounded bg-[#141618] border border-[#2E3236] text-[#D8DEE4] font-mono-code text-xs overflow-x-auto leading-relaxed">
+                  {tut.code}
+                </pre>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
