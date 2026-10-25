@@ -100,6 +100,8 @@ export interface ScriptTab {
   isMinimized?: boolean;
   x?: number;
   y?: number;
+  width?: number;
+  height?: number;
   zIndex?: number;
 }
 

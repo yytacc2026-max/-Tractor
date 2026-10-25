@@ -16,6 +16,7 @@ interface FloatingCodeEditorProps {
   onToggleMinimizeScript: (id: string) => void;
   onCloseScriptWindow: (id: string) => void;
   onMoveScriptWindow: (id: string, x: number, y: number) => void;
+  onResizeScriptWindow?: (id: string, width: number, height: number) => void;
   isRunning: boolean;
   isStepWaiting: boolean;
   activeLine: number | null;
@@ -27,16 +28,6 @@ interface FloatingCodeEditorProps {
   executionSpeed: number;
   onChangeSpeed: (speed: number) => void;
 }
-
-const QUICK_SNIPPETS = [
-  { label: 'move(1)', snippet: 'move(1)\n' },
-  { label: 'turn("right")', snippet: 'turn("right")\n' },
-  { label: 'plow()', snippet: 'plow()\n' },
-  { label: 'plant("wheat")', snippet: 'plant("wheat")\n' },
-  { label: 'harvest()', snippet: 'harvest()\n' },
-  { label: 'while True:', snippet: 'while True:\n    ' },
-  { label: 'if can_harvest():', snippet: 'if can_harvest():\n    harvest()\n' },
-];
 
 interface SingleWindowProps {
   script: ScriptTab;
@@ -53,6 +44,7 @@ interface SingleWindowProps {
   onToggleMinimize: () => void;
   onCloseWindow: () => void;
   onMoveWindow: (x: number, y: number) => void;
+  onResizeWindow?: (width: number, height: number) => void;
   onRunThis: () => void;
   onStepThis: () => void;
   onStop: () => void;
@@ -61,6 +53,13 @@ interface SingleWindowProps {
   executionSpeed: number;
   onChangeSpeed: (speed: number) => void;
 }
+
+type ResizeDirection = 'e' | 's' | 'se' | null;
+
+const DEFAULT_WIDTH = 420;
+const DEFAULT_HEIGHT = 192;
+const MIN_WIDTH = 270;
+const MIN_HEIGHT = 100;
 
 const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
   script,
@@ -77,6 +76,7 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
   onToggleMinimize,
   onCloseWindow,
   onMoveWindow,
+  onResizeWindow,
   onRunThis,
   onStepThis,
   onStop,
@@ -88,6 +88,17 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(script.name);
   const [showConsole, setShowConsole] = useState(false);
+
+  const [winWidth, setWinWidth] = useState<number>(script.width ?? DEFAULT_WIDTH);
+  const [editorHeight, setEditorHeight] = useState<number>(script.height ?? DEFAULT_HEIGHT);
+
+  useEffect(() => {
+    if (typeof script.width === 'number') setWinWidth(script.width);
+  }, [script.width]);
+
+  useEffect(() => {
+    if (typeof script.height === 'number') setEditorHeight(script.height);
+  }, [script.height]);
 
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -107,6 +118,20 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
     origY: script.y ?? 80,
   });
 
+  const resizeRef = useRef<{
+    resizing: ResizeDirection;
+    startX: number;
+    startY: number;
+    origW: number;
+    origH: number;
+  }>({
+    resizing: null,
+    startX: 0,
+    startY: 0,
+    origW: winWidth,
+    origH: editorHeight,
+  });
+
   useEffect(() => {
     if (autoFocusRename) {
       setIsEditingName(true);
@@ -124,16 +149,39 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
 
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
-      if (!dragRef.current.dragging) return;
-      const dx = e.clientX - dragRef.current.startX;
-      const dy = e.clientY - dragRef.current.startY;
-      const nextX = Math.max(8, Math.min(window.innerWidth - 220, dragRef.current.origX + dx));
-      const nextY = Math.max(46, Math.min(window.innerHeight - 44, dragRef.current.origY + dy));
-      onMoveWindow(nextX, nextY);
+      if (dragRef.current.dragging) {
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        const nextX = Math.max(8, Math.min(window.innerWidth - 200, dragRef.current.origX + dx));
+        const nextY = Math.max(46, Math.min(window.innerHeight - 44, dragRef.current.origY + dy));
+        onMoveWindow(nextX, nextY);
+      } else if (resizeRef.current.resizing) {
+        const dir = resizeRef.current.resizing;
+        const dx = e.clientX - resizeRef.current.startX;
+        const dy = e.clientY - resizeRef.current.startY;
+
+        let nextW = resizeRef.current.origW;
+        let nextH = resizeRef.current.origH;
+
+        const maxW = Math.max(MIN_WIDTH, window.innerWidth - (script.x ?? 24) - 12);
+        const maxH = Math.max(MIN_HEIGHT, window.innerHeight - (script.y ?? 80) - 90);
+
+        if (dir === 'e' || dir === 'se') {
+          nextW = Math.max(MIN_WIDTH, Math.min(maxW, Math.round(resizeRef.current.origW + dx)));
+          setWinWidth(nextW);
+        }
+        if (dir === 's' || dir === 'se') {
+          nextH = Math.max(MIN_HEIGHT, Math.min(maxH, Math.round(resizeRef.current.origH + dy)));
+          setEditorHeight(nextH);
+        }
+
+        onResizeWindow?.(nextW, nextH);
+      }
     };
 
     const handlePointerUp = () => {
       dragRef.current.dragging = false;
+      resizeRef.current.resizing = null;
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -142,7 +190,7 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [onMoveWindow]);
+  }, [onMoveWindow, onResizeWindow, script.x, script.y]);
 
   const commitName = () => {
     const cleaned = nameDraft.trim();
@@ -165,6 +213,19 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
       startY: e.clientY,
       origX: script.x ?? 24,
       origY: script.y ?? 80,
+    };
+  };
+
+  const startResize = (dir: ResizeDirection) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onFocusWindow();
+    resizeRef.current = {
+      resizing: dir,
+      startX: e.clientX,
+      startY: e.clientY,
+      origW: winWidth,
+      origH: editorHeight,
     };
   };
 
@@ -207,11 +268,10 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
       onPointerDown={onFocusWindow}
       style={{
         transform: `translate3d(${posX}px, ${posY}px, 0)`,
+        width: isMinimized ? 280 : winWidth,
         zIndex: script.zIndex ?? (isActive ? 38 : 30),
       }}
-      className={`fixed top-0 left-0 pointer-events-auto rounded-[4px] border transition-shadow ${
-        isMinimized ? 'w-[280px]' : 'w-[420px] max-w-[92vw]'
-      } ${
+      className={`fixed top-0 left-0 pointer-events-auto rounded-[4px] border transition-shadow max-w-[96vw] ${
         isActive
           ? 'border-[#84B034] shadow-[0_12px_32px_rgba(0,0,0,0.65)]'
           : 'border-[#55595E] shadow-[0_6px_20px_rgba(0,0,0,0.45)]'
@@ -257,7 +317,7 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
             </svg>
           </button>
 
-          {/* Editable Script Window Title (Matches Reference Image: PriorityFarming, Carrot, Grass, etc.) */}
+          {/* Editable Script Window Title */}
           {isEditingName ? (
             <input
               ref={nameInputRef}
@@ -343,21 +403,11 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
       {/* Expandable Code Body */}
       {!isMinimized && (
         <>
-          {/* Quick Python Snippet Bar */}
-          <div className="flex items-center gap-1 px-2 py-1 bg-[#2A2D30] border-b border-[#3A3D40] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {QUICK_SNIPPETS.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => handleInsertSnippet(item.snippet)}
-                className="px-1.5 py-0.5 text-[10px] font-mono-code rounded bg-[#363A3E] hover:bg-[#658B1E] text-[#E8ECEF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Code Editor Area */}
-          <div className="relative flex h-48 bg-[#212325]">
+          {/* Code Editor Area with Dynamic Manual Height */}
+          <div
+            style={{ height: `${editorHeight}px` }}
+            className="relative flex bg-[#212325]"
+          >
             {/* Line Number Gutter */}
             <div
               ref={gutterRef}
@@ -408,8 +458,8 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
           </div>
 
           {/* Compact Console Drawer Footer */}
-          <div className="border-t border-[#36393D] bg-[#1A1C1E] rounded-b-[3px]">
-            <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-[#9BA1A8]">
+          <div className="relative border-t border-[#36393D] bg-[#1A1C1E] rounded-b-[3px]">
+            <div className="flex items-center justify-between pl-2.5 pr-6 py-1 text-[10px] text-[#9BA1A8]">
               <button
                 onClick={() => setShowConsole(!showConsole)}
                 className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
@@ -457,6 +507,28 @@ const SingleFloatingScriptWindow: React.FC<SingleWindowProps> = ({
               </div>
             )}
           </div>
+
+          {/* Manual Resize Handles: Right Edge (Width), Bottom Edge (Height), and Bottom-Right Corner Grip */}
+          <div
+            onPointerDown={startResize('e')}
+            title="Tarik untuk mengubah lebar tab coding"
+            className="absolute top-8 right-0 bottom-3 w-2 cursor-ew-resize z-20"
+          />
+          <div
+            onPointerDown={startResize('s')}
+            title="Tarik untuk mengubah tinggi tab coding"
+            className="absolute left-0 right-4 bottom-0 h-2 cursor-ns-resize z-20"
+          />
+          <div
+            onPointerDown={startResize('se')}
+            title="Tarik sudut ini untuk mengatur ukuran (size) tab coding"
+            className="absolute right-0 bottom-0 w-4 h-4 cursor-nwse-resize z-30 flex items-end justify-end p-0.5 text-[#84B034] hover:text-[#B8F252]"
+          >
+            <svg viewBox="0 0 12 12" className="w-3 h-3 fill-none stroke-current stroke-[1.6]">
+              <line x1="11" y1="3" x2="3" y2="11" />
+              <line x1="11" y1="7" x2="7" y2="11" />
+            </svg>
+          </div>
         </>
       )}
     </div>
@@ -477,6 +549,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
   onToggleMinimizeScript,
   onCloseScriptWindow,
   onMoveScriptWindow,
+  onResizeScriptWindow,
   isRunning,
   isStepWaiting,
   activeLine,
@@ -511,6 +584,7 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
           onToggleMinimize={() => onToggleMinimizeScript(script.id)}
           onCloseWindow={() => onCloseScriptWindow(script.id)}
           onMoveWindow={(nx, ny) => onMoveScriptWindow(script.id, nx, ny)}
+          onResizeWindow={(nw, nh) => onResizeScriptWindow?.(script.id, nw, nh)}
           onRunThis={() => onRun(script.id)}
           onStepThis={() => onStep(script.id)}
           onStop={onStop}
@@ -523,3 +597,4 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
     </>
   );
 };
+

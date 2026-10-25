@@ -1969,6 +1969,11 @@ export default function App() {
               prev.map((s) => (s.id === id ? { ...s, x, y } : s))
             );
           }}
+          onResizeScriptWindow={(id, width, height) => {
+            setScripts((prev) =>
+              prev.map((s) => (s.id === id ? { ...s, width, height } : s))
+            );
+          }}
           isRunning={isRunningCode}
           isStepWaiting={isStepMode}
           activeLine={activeLine}
