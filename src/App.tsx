@@ -1363,6 +1363,20 @@ export default function App() {
     .filter((s): s is SavedGameSlot => Boolean(s))
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
 
+  // Start looping MP3 background music on mount / first user interaction
+  useEffect(() => {
+    soundFX.startBGM();
+    const unlockAudio = () => {
+      soundFX.startBGM();
+    };
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, []);
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1377,6 +1391,7 @@ export default function App() {
       if (screen === 'title') {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
+          soundFX.startBGM();
           if (latestSaveSlot) {
             loadGameFromSlot(latestSaveSlot.slotId);
           } else {
@@ -1761,10 +1776,11 @@ export default function App() {
 
               <button
                 onClick={() => {
-                  soundFX.muted = !isMuted;
-                  setIsMuted(!isMuted);
+                  const nextMuted = !isMuted;
+                  soundFX.setMuted(nextMuted);
+                  setIsMuted(nextMuted);
                 }}
-                title={isMuted ? 'Unmute Audio' : 'Mute Audio'}
+                title={isMuted ? 'Unmute Musik & Audio' : 'Mute Musik & Audio'}
                 className="w-10 h-10 flex items-center justify-center rounded bg-[#474A4D] hover:bg-[#5A5E62] text-white text-xs font-mono-code border border-[#6E7378] shadow-lg transition-colors cursor-pointer"
               >
                 {isMuted ? 'MUTE' : 'SFX'}

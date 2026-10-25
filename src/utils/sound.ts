@@ -1,8 +1,45 @@
-// Procedural Web Audio API sound effects for AgroCode (Zero external MP3/WAV dependencies)
+// Procedural Web Audio API sound effects + Background Music MP3 for этаTractor
+
+const BGM_SRC = '/assets/aistudio/Workers-Resources-SnapYT.App_d4452c3d.mp3';
 
 class SoundController {
   private ctx: AudioContext | null = null;
+  private bgm: HTMLAudioElement | null = null;
   public muted: boolean = false;
+
+  private ensureBGM(): HTMLAudioElement | null {
+    if (typeof window === 'undefined') return null;
+    if (!this.bgm) {
+      this.bgm = new Audio(BGM_SRC);
+      this.bgm.loop = true;
+      this.bgm.volume = 0.42;
+      this.bgm.preload = 'auto';
+    }
+    return this.bgm;
+  }
+
+  public startBGM() {
+    const audio = this.ensureBGM();
+    if (!audio) return;
+    audio.muted = this.muted;
+    if (!this.muted && audio.paused) {
+      audio.play().catch(() => {
+        // Browser autoplay blocked until first user gesture
+      });
+    }
+  }
+
+  public setMuted(nextMuted: boolean) {
+    this.muted = nextMuted;
+    const audio = this.ensureBGM();
+    if (!audio) return;
+    audio.muted = nextMuted;
+    if (nextMuted) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+  }
 
   private getContext(): AudioContext | null {
     if (this.muted) return null;
@@ -196,6 +233,10 @@ class SoundController {
 
     osc.start(now);
     osc.stop(now + 0.25);
+  }
+
+  public playDeliver() {
+    this.playUnlock();
   }
 }
 
