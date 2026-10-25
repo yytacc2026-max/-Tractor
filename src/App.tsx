@@ -1763,15 +1763,8 @@ export default function App() {
           <div className="flex items-start justify-between gap-3">
             {/* Top-Left: Transparent Tractor Telemetry & Barn Inventory with Tech Tree Icons */}
             <div className="pointer-events-auto flex flex-col gap-1.5 bg-transparent px-1 py-0.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
-              {/* Row 1: AGROCODE + Fuel + Tool + Cargo + Multi-Tractor Count with Tech Tree Icons */}
+              {/* Row 1: Fuel + Tool + Cargo + Multi-Tractor Count with Tech Tree Icons */}
               <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono-code">
-                <span className="inline-flex items-center gap-1.5 font-display font-bold text-white tracking-tight text-sm">
-                  {renderNodeCenterVisual('tractor_speed', '', 'w-5 h-5')}
-                  <span>этаTractor</span>
-                </span>
-
-                <span className="text-white/75">·</span>
-
                 <span
                   className={`inline-flex items-center gap-1 ${
                     tractor.fuel < 25 ? 'text-[#FF7B72] font-bold' : 'text-[#FFD166] font-semibold'
