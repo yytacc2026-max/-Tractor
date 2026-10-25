@@ -1805,11 +1805,6 @@ export default function App() {
 
               {/* Row 2: Barn Commodities with 3D Isometric Tech Tree Icons (Transparent, No Box) */}
               <div className="flex flex-wrap items-center gap-3 text-xs font-mono-code text-white font-semibold">
-                <span className="inline-flex items-center gap-1 text-[#E2E8F0]">
-                  {renderNodeCenterVisual('grid_expand', '', 'w-4 h-4')}
-                  <span>Barn:</span>
-                </span>
-
                 <span className="inline-flex items-center gap-1.5">
                   {renderResourceIcon('jerami', 'w-5 h-5')}
                   <span>Wheat {warehouse.jerami}</span>
