@@ -33,6 +33,11 @@ import {
 } from './components/ModalsAndDocs';
 import { AgroPythonInterpreter } from './engine/pythonInterpreter';
 import { soundFX } from './utils/sound';
+import {
+  loadAllPersistedSaveSlots,
+  persistSaveSlotsEverywhere,
+  readSyncSaveSlots,
+} from './utils/saveStorage';
 
 function createInitialGrid(size: number, irrigationLevel = 0): TileData[][] {
   const grid: TileData[][] = [];
@@ -128,22 +133,25 @@ export default function App() {
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [confirmOverwriteSlot, setConfirmOverwriteSlot] = useState<string | null>(null);
 
-  // Load saved slots from localStorage on mount
-  const [saveSlots, setSaveSlots] = useState<Record<string, SavedGameSlot>>(() => {
-    try {
-      const raw = localStorage.getItem(SAVE_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          delete parsed.autosave;
-          return parsed;
-        }
+  // Load saved slots synchronously on mount (localStorage + Electron Home Dir)
+  const [saveSlots, setSaveSlots] = useState<Record<string, SavedGameSlot>>(() =>
+    readSyncSaveSlots<SavedGameSlot>()
+  );
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Also hydrate asynchronously from IndexedDB & Server Disk File (~/.etatractor/save_slots.json)
+  useEffect(() => {
+    let active = true;
+    loadAllPersistedSaveSlots<SavedGameSlot>().then((loaded) => {
+      if (active && Object.keys(loaded).length > 0) {
+        saveSlotsRef.current = loaded;
+        setSaveSlots(loaded);
       }
-    } catch {
-      // ignore storage errors
-    }
-    return {};
-  });
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Farm Grid & Warehouse Inventory (Wheat, Wood, Carrot, Corn)
   const [tiles, setTiles] = useState<TileData[][]>(() => createInitialGrid(4));
@@ -1169,16 +1177,7 @@ export default function App() {
         executionSpeed: speedRef.current,
       };
 
-      let currentStored: Record<string, SavedGameSlot> = {};
-      try {
-        const raw = localStorage.getItem(SAVE_STORAGE_KEY);
-        if (raw) {
-          currentStored = JSON.parse(raw);
-          delete currentStored.autosave;
-        }
-      } catch {
-        currentStored = { ...saveSlotsRef.current };
-      }
+      const currentStored = readSyncSaveSlots<SavedGameSlot>();
 
       const nextSlots: Record<string, SavedGameSlot> = {
         ...currentStored,
@@ -1187,11 +1186,7 @@ export default function App() {
       };
       delete nextSlots.autosave;
 
-      try {
-        localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(nextSlots));
-      } catch {
-        // ignore storage quota errors
-      }
+      persistSaveSlotsEverywhere(nextSlots);
 
       saveSlotsRef.current = nextSlots;
       setSaveSlots(nextSlots);
@@ -1208,21 +1203,14 @@ export default function App() {
 
   const loadGameFromSlot = useCallback(
     (slotId: string) => {
-      // Always read the latest saved slots from localStorage first so nothing is ever stale
-      let latestSlots: Record<string, SavedGameSlot> = saveSlotsRef.current;
-      try {
-        const raw = localStorage.getItem(SAVE_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            latestSlots = { ...saveSlotsRef.current, ...parsed };
-            saveSlotsRef.current = latestSlots;
-            setSaveSlots(latestSlots);
-          }
-        }
-      } catch {
-        // fallback to in-memory ref
-      }
+      // Always read the latest saved slots across all storage layers first
+      const syncStored = readSyncSaveSlots<SavedGameSlot>();
+      const latestSlots: Record<string, SavedGameSlot> = {
+        ...saveSlotsRef.current,
+        ...syncStored,
+      };
+      saveSlotsRef.current = latestSlots;
+      setSaveSlots(latestSlots);
 
       const slot = latestSlots[slotId];
       if (!slot) return;
@@ -1324,14 +1312,52 @@ export default function App() {
       const next = { ...prev };
       delete next[slotId];
       saveSlotsRef.current = next;
-      try {
-        localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
+      persistSaveSlotsEverywhere(next);
       return next;
     });
   }, []);
+
+  const handleExportSaveFile = useCallback(() => {
+    const dataStr = JSON.stringify(saveSlotsRef.current, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'etaTractor_SaveGame.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    triggerSaveToast('File Save Game (etaTractor_SaveGame.json) berhasil diunduh!');
+  }, [triggerSaveToast]);
+
+  const handleImportSaveFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || '{}'));
+          if (parsed && typeof parsed === 'object') {
+            delete parsed.autosave;
+            const merged = { ...saveSlotsRef.current, ...parsed };
+            saveSlotsRef.current = merged;
+            setSaveSlots(merged);
+            persistSaveSlotsEverywhere(merged);
+            soundFX.playUnlock();
+            triggerSaveToast('Data Save Game berhasil diimpor!');
+          }
+        } catch {
+          soundFX.playError();
+          triggerSaveToast('Format file Save Game tidak valid.');
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    },
+    [triggerSaveToast]
+  );
 
   const handleStartNewGame = useCallback(() => {
     stopPythonExecution();
@@ -1358,6 +1384,8 @@ export default function App() {
     setConfirmOverwriteSlot(null);
     setIsEditorOpen(true);
     setShowMainMenuSlots(false);
+    setShowMainMenuOptions(false);
+    setIsDocsModalOpen(true);
     setScreen('playing');
     addLog('info', 'Started a New Game (Existing Save Slots are preserved).');
   }, [addLog, stopPythonExecution]);
@@ -1400,7 +1428,7 @@ export default function App() {
           if (latestSaveSlot) {
             loadGameFromSlot(latestSaveSlot.slotId);
           } else {
-            setScreen('playing');
+            handleStartNewGame();
           }
         }
         return;
@@ -1423,6 +1451,7 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    handleStartNewGame,
     isAiModalOpen,
     isDocsModalOpen,
     isTechModalOpen,
@@ -1436,6 +1465,13 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none">
+      <input
+        ref={importFileInputRef}
+        type="file"
+        accept=".json,application/json"
+        onChange={handleImportSaveFile}
+        className="hidden"
+      />
       {/* Save Notification Toast */}
       {saveNotification && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[90] pointer-events-none flex items-center gap-2 bg-[#232527]/95 text-[#B8F252] border border-[#658B1E] px-4 py-2 rounded shadow-2xl font-mono-code text-xs font-bold">
@@ -1743,7 +1779,23 @@ export default function App() {
                   })}
                 </div>
 
-                <div className="pt-1 flex justify-end">
+                <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={handleExportSaveFile}
+                      title="Simpan cadangan Save Game ke file komputer (.json)"
+                      className="px-2.5 py-1.5 rounded bg-[#2D3339] hover:bg-[#3D454D] text-[#9CD03B] font-mono-code text-[11px] border border-[#4D565E] cursor-pointer"
+                    >
+                      Export File (.json)
+                    </button>
+                    <button
+                      onClick={() => importFileInputRef.current?.click()}
+                      title="Muat file cadangan Save Game dari komputer (.json)"
+                      className="px-2.5 py-1.5 rounded bg-[#2D3339] hover:bg-[#3D454D] text-[#7CE8FF] font-mono-code text-[11px] border border-[#4D565E] cursor-pointer"
+                    >
+                      Import File (.json)
+                    </button>
+                  </div>
                   <button
                     onClick={() => setShowMainMenuSlots(false)}
                     className="px-4 py-1.5 rounded bg-[#383C40] hover:bg-[#494E53] text-white font-mono-code text-xs cursor-pointer"
@@ -2107,8 +2159,26 @@ export default function App() {
               <>
                 {/* Save Slots inside Pause Menu */}
                 <div className="text-left space-y-2">
-                  <div className="text-xs font-mono-code font-bold text-[#E2E8F0]">
-                    PILIH SLOT SAVE GAME:
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-mono-code font-bold text-[#E2E8F0]">
+                      PILIH SLOT SAVE GAME:
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleExportSaveFile}
+                        title="Simpan cadangan Save Game ke file komputer (.json)"
+                        className="px-2 py-0.5 rounded bg-[#2D3339] hover:bg-[#3D454D] text-[#9CD03B] font-mono-code text-[10px] border border-[#4D565E] cursor-pointer"
+                      >
+                        Export .json
+                      </button>
+                      <button
+                        onClick={() => importFileInputRef.current?.click()}
+                        title="Muat file cadangan Save Game dari komputer (.json)"
+                        className="px-2 py-0.5 rounded bg-[#2D3339] hover:bg-[#3D454D] text-[#7CE8FF] font-mono-code text-[10px] border border-[#4D565E] cursor-pointer"
+                      >
+                        Import .json
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                     {(['slot_1', 'slot_2', 'slot_3'] as const).map((slotKey) => {

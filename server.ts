@@ -1,6 +1,8 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
+import os from "os";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
@@ -10,11 +12,62 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Permanent save file path in User Home Directory (survives portable .exe restarts & temp folder cleanup)
+const SAVE_DIR = path.join(os.homedir(), ".etatractor");
+const SAVE_FILE_PATH = path.join(SAVE_DIR, "save_slots.json");
+
+function readDiskSaveSlots(): Record<string, unknown> {
+  try {
+    if (fs.existsSync(SAVE_FILE_PATH)) {
+      const raw = fs.readFileSync(SAVE_FILE_PATH, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        delete (parsed as Record<string, unknown>).autosave;
+        return parsed as Record<string, unknown>;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to read disk save slots:", err);
+  }
+  return {};
+}
+
+function writeDiskSaveSlots(slots: Record<string, unknown>): boolean {
+  try {
+    if (!fs.existsSync(SAVE_DIR)) {
+      fs.mkdirSync(SAVE_DIR, { recursive: true });
+    }
+    const cleanSlots = { ...slots };
+    delete cleanSlots.autosave;
+    fs.writeFileSync(SAVE_FILE_PATH, JSON.stringify(cleanSlots, null, 2), "utf-8");
+    return true;
+  } catch (err) {
+    console.warn("Failed to write disk save slots:", err);
+    return false;
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "5mb" }));
+
+  // Persistent Disk Save Game Endpoints (for Desktop .exe & Local Server)
+  app.get("/api/saves", (_req, res) => {
+    const slots = readDiskSaveSlots();
+    res.json({ slots, savePath: SAVE_FILE_PATH });
+  });
+
+  app.post("/api/saves", (req, res) => {
+    const incoming = req.body?.slots;
+    if (!incoming || typeof incoming !== "object") {
+      res.status(400).json({ error: "Invalid slots payload" });
+      return;
+    }
+    const ok = writeDiskSaveSlots(incoming as Record<string, unknown>);
+    res.json({ ok, savePath: SAVE_FILE_PATH });
+  });
 
   // High-Thinking Gemini AI Endpoint for Python Farm Code Optimization & Debugging
   app.post("/api/ai/optimize", async (req, res) => {
