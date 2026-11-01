@@ -510,7 +510,7 @@ export const INITIAL_TECH_NODES: TechNode[] = [
   },
 ];
 
-export const INITIAL_SCRIPTS: ScriptTab[] = [
+export const NORMAL_INITIAL_SCRIPTS: ScriptTab[] = [
   {
     id: 'main',
     name: 'main',
@@ -519,6 +519,20 @@ export const INITIAL_SCRIPTS: ScriptTab[] = [
     x: 20,
     y: 80,
     zIndex: 32,
+    code: `# Tulis kode Python kamu di sini
+`,
+  },
+];
+
+export const SANDBOX_INITIAL_SCRIPTS: ScriptTab[] = [
+  {
+    id: 'main',
+    name: 'main',
+    isOpen: true,
+    isMinimized: false,
+    x: 20,
+    y: 80,
+    zIndex: 35,
     code: `# Press Play (▶) or Step (▷) to run Python code
 harvest()
 plow()
@@ -534,8 +548,8 @@ turn("right")
     isMinimized: true,
     x: 20,
     y: 448,
-    zIndex: 31,
-    code: `# Continuous loop automation
+    zIndex: 34,
+    code: `# Otomatisasi penuh 1 traktor tanpa henti (Tinggal tekan Play ▶)
 while True:
     if tractor.fuel < 25:
         tractor.go_to_fuel()
@@ -545,7 +559,7 @@ while True:
         tractor.deliver()
     if can_harvest():
         tractor.harvest()
-    if check_soil() == "wild":
+    if check_soil() == "wild" or check_soil() == "mud":
         tractor.plow()
         tractor.plant("wheat")
     elif check_soil() == "plowed":
@@ -562,15 +576,84 @@ while True:
     isMinimized: true,
     x: 20,
     y: 492,
-    zIndex: 30,
-    code: `# Control multiple tractors using Python code (Unlock 'Armada Multi-Traktor')
-for i in range(num_tractors()):
-    use_tractor(i)
-    if can_harvest():
-        harvest()
-    plow()
-    plant("wheat")
-    move(1)
+    zIndex: 33,
+    code: `# Kendalikan semua traktor sekaligus (Upgrade 'Armada Multi-Traktor' Gratis di Tech Tree ^)
+while True:
+    for i in range(num_tractors()):
+        use_tractor(i)
+        if tractor.fuel < 25:
+            go_to_fuel()
+            refuel()
+        if can_harvest():
+            harvest()
+        if check_soil() == "wild" or check_soil() == "mud":
+            plow()
+            plant("wheat")
+        elif check_soil() == "plowed":
+            plant("wheat")
+        move(1)
+        if get_pos_x() == get_world_size() - 1 or get_pos_x() == 0:
+            turn("right")
+`,
+  },
+  {
+    id: 'zig_zag_pulau',
+    name: 'zig_zag_pulau',
+    isOpen: true,
+    isMinimized: true,
+    x: 20,
+    y: 536,
+    zIndex: 32,
+    code: `# Sapu bersih seluruh petak pulau dengan pola Zig-Zag otomatis
+while True:
+    size = get_world_size()
+    for z in range(size):
+        for step in range(size):
+            if z % 2 == 0:
+                x = step
+            else:
+                x = size - 1 - step
+            if (x == 0 and z == 0) or (x == size - 1 and z == 0):
+                continue
+            if tractor.fuel < 25:
+                go_to_fuel()
+                refuel()
+            goto(x, z)
+            if can_harvest():
+                harvest()
+            plow()
+            plant("wheat")
+`,
+  },
+  {
+    id: 'kebun_campuran',
+    name: 'kebun_campuran',
+    isOpen: true,
+    isMinimized: true,
+    x: 20,
+    y: 580,
+    zIndex: 31,
+    code: `# Tanam 4 komoditas berbeda (Wheat, Carrot, Wood, Corn) secara otomatis
+seeds = ["wheat", "carrot", "wood", "corn"]
+
+while True:
+    size = get_world_size()
+    for z in range(1, size):
+        for x in range(size):
+            if tractor.fuel < 25:
+                go_to_fuel()
+                refuel()
+            goto(x, z)
+            if can_harvest():
+                harvest()
+            plow()
+            pilihan = seeds[(x + z) % 4]
+            plant(pilihan)
+            fertilize()
+            harvest()
 `,
   },
 ];
+
+export const INITIAL_SCRIPTS: ScriptTab[] = NORMAL_INITIAL_SCRIPTS;
+

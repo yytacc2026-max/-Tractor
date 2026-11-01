@@ -76,7 +76,6 @@ export class AgroPythonInterpreter {
     this.variables = {};
     this.functions = {};
     this.stepCount = 0;
-    this.ctx.setActiveTractorIndex(0);
 
     const lines = this.preprocessLines(rawCode);
     if (lines.length === 0) {

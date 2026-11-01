@@ -7,6 +7,9 @@ interface FloatingCodeEditorProps {
   scripts: ScriptTab[];
   activeScriptId: string;
   runningScriptId: string | null;
+  runningScriptIds?: string[];
+  stepWaitingScriptIds?: string[];
+  activeLines?: Record<string, number | null>;
   newlyCreatedId?: string | null;
   onClearNewlyCreated?: () => void;
   onSelectScript: (id: string) => void;
@@ -22,7 +25,7 @@ interface FloatingCodeEditorProps {
   activeLine: number | null;
   onRun: (scriptId: string) => void;
   onStep: (scriptId: string) => void;
-  onStop: () => void;
+  onStop: (scriptId?: string) => void;
   logs: ConsoleLogEntry[];
   onClearLogs: () => void;
   executionSpeed: number;
@@ -540,6 +543,9 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
   scripts,
   activeScriptId,
   runningScriptId,
+  runningScriptIds,
+  stepWaitingScriptIds,
+  activeLines,
   newlyCreatedId,
   onClearNewlyCreated,
   onSelectScript,
@@ -567,33 +573,47 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
 
   return (
     <>
-      {openWindows.map((script) => (
-        <SingleFloatingScriptWindow
-          key={script.id}
-          script={script}
-          isActive={script.id === activeScriptId}
-          isThisRunning={isRunning && runningScriptId === script.id}
-          isStepWaiting={isStepWaiting && runningScriptId === script.id}
-          activeLine={runningScriptId === script.id ? activeLine : null}
-          autoFocusRename={newlyCreatedId === script.id}
-          onClearAutoFocusRename={onClearNewlyCreated}
-          onFocusWindow={() => onSelectScript(script.id)}
-          onUpdateCode={(newCode) => onUpdateCode(script.id, newCode)}
-          onRename={(newName) => onRenameScript(script.id, newName)}
-          onAddNewPopup={() => onAddScript()}
-          onToggleMinimize={() => onToggleMinimizeScript(script.id)}
-          onCloseWindow={() => onCloseScriptWindow(script.id)}
-          onMoveWindow={(nx, ny) => onMoveScriptWindow(script.id, nx, ny)}
-          onResizeWindow={(nw, nh) => onResizeScriptWindow?.(script.id, nw, nh)}
-          onRunThis={() => onRun(script.id)}
-          onStepThis={() => onStep(script.id)}
-          onStop={onStop}
-          logs={logs}
-          onClearLogs={onClearLogs}
-          executionSpeed={executionSpeed}
-          onChangeSpeed={onChangeSpeed}
-        />
-      ))}
+      {openWindows.map((script) => {
+        const isThisRunning = runningScriptIds
+          ? runningScriptIds.includes(script.id)
+          : isRunning && runningScriptId === script.id;
+        const isThisStepWaiting = stepWaitingScriptIds
+          ? stepWaitingScriptIds.includes(script.id)
+          : isStepWaiting && runningScriptId === script.id;
+        const thisActiveLine = activeLines
+          ? (activeLines[script.id] ?? null)
+          : runningScriptId === script.id
+          ? activeLine
+          : null;
+
+        return (
+          <SingleFloatingScriptWindow
+            key={script.id}
+            script={script}
+            isActive={script.id === activeScriptId}
+            isThisRunning={isThisRunning}
+            isStepWaiting={isThisStepWaiting}
+            activeLine={thisActiveLine}
+            autoFocusRename={newlyCreatedId === script.id}
+            onClearAutoFocusRename={onClearNewlyCreated}
+            onFocusWindow={() => onSelectScript(script.id)}
+            onUpdateCode={(newCode) => onUpdateCode(script.id, newCode)}
+            onRename={(newName) => onRenameScript(script.id, newName)}
+            onAddNewPopup={() => onAddScript()}
+            onToggleMinimize={() => onToggleMinimizeScript(script.id)}
+            onCloseWindow={() => onCloseScriptWindow(script.id)}
+            onMoveWindow={(nx, ny) => onMoveScriptWindow(script.id, nx, ny)}
+            onResizeWindow={(nw, nh) => onResizeScriptWindow?.(script.id, nw, nh)}
+            onRunThis={() => onRun(script.id)}
+            onStepThis={() => onStep(script.id)}
+            onStop={() => onStop(script.id)}
+            logs={logs}
+            onClearLogs={onClearLogs}
+            executionSpeed={executionSpeed}
+            onChangeSpeed={onChangeSpeed}
+          />
+        );
+      })}
     </>
   );
 };

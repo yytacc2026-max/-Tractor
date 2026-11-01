@@ -19,6 +19,8 @@ import {
 import {
   INITIAL_SCRIPTS,
   INITIAL_TECH_NODES,
+  NORMAL_INITIAL_SCRIPTS,
+  SANDBOX_INITIAL_SCRIPTS,
   getIslandSizeForLevel,
   getUpgradeCostsForNode,
 } from './data/techTreeData';
@@ -119,6 +121,7 @@ interface SavedGameSlot {
   slotTitle: string;
   savedAt: string;
   timestamp: number;
+  gameMode?: 'normal' | 'sandbox';
   tiles: TileData[][];
   warehouse: Inventory;
   tractor: TractorState;
@@ -152,6 +155,8 @@ const DEFAULT_TRACTOR_STATE: TractorState = {
 export default function App() {
   // Game Shell State
   const [screen, setScreen] = useState<GameShellScreen>('title');
+  const [gameMode, setGameMode] = useState<'normal' | 'sandbox'>('normal');
+  const [showNewGameModeSelect, setShowNewGameModeSelect] = useState<boolean>(false);
   const [musicVolume, setMusicVolume] = useState<number>(50);
   const [sfxVolume, setSfxVolume] = useState<number>(80);
   const [musicMuted, setMusicMuted] = useState<boolean>(false);
@@ -216,10 +221,13 @@ export default function App() {
   const [isDocsModalOpen, setIsDocsModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
 
-  // Python IDE State (Multiple Floating Pop-Up Windows)
+  // Python IDE State (Multiple Floating Pop-Up Windows — Concurrent Execution Support)
   const [scripts, setScripts] = useState<ScriptTab[]>(INITIAL_SCRIPTS);
   const [activeScriptId, setActiveScriptId] = useState<string>('main');
   const [runningScriptId, setRunningScriptId] = useState<string | null>(null);
+  const [runningScriptIds, setRunningScriptIds] = useState<string[]>([]);
+  const [stepWaitingScriptIds, setStepWaitingScriptIds] = useState<string[]>([]);
+  const [activeLinesByScript, setActiveLinesByScript] = useState<Record<string, number | null>>({});
   const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null);
   const [isRunningCode, setIsRunningCode] = useState<boolean>(false);
   const [isStepMode, setIsStepMode] = useState<boolean>(false);
@@ -254,10 +262,23 @@ export default function App() {
   activeScriptIdRef.current = activeScriptId;
   const saveSlotsRef = useRef(saveSlots);
   saveSlotsRef.current = saveSlots;
+  const gameModeRef = useRef<'normal' | 'sandbox'>(gameMode);
+  gameModeRef.current = gameMode;
 
   const stopRequestedRef = useRef<boolean>(false);
   const stepGateResolverRef = useRef<(() => void) | null>(null);
   const isStepModeRef = useRef<boolean>(false);
+  const runningContextsRef = useRef<
+    Record<
+      string,
+      {
+        stopRequested: boolean;
+        isStepMode: boolean;
+        stepGateResolver: (() => void) | null;
+        tractorIdx: number;
+      }
+    >
+  >({});
 
   const addLog = useCallback(
     (type: ConsoleLogEntry['type'], message: string, line?: number) => {
@@ -278,6 +299,7 @@ export default function App() {
   );
 
   const isNodeUnlocked = useCallback((nodeId: string) => {
+    if (gameModeRef.current === 'sandbox') return true;
     const found = techNodesRef.current.find((n) => n.id === nodeId);
     return Boolean(found && (found.unlocked || found.level > 0));
   }, []);
@@ -389,7 +411,11 @@ export default function App() {
   );
 
   const actionMove = useCallback(
-    async (arg: number | string = 1, tractorIdx?: number) => {
+    async (
+      arg: number | string = 1,
+      tractorIdx?: number,
+      shouldCancel?: () => boolean
+    ) => {
       if (typeof arg === 'string') {
         await actionTurn(arg, tractorIdx);
         arg = 1;
@@ -398,7 +424,7 @@ export default function App() {
       const size = tilesRef.current.length;
 
       for (let s = 0; s < steps; s++) {
-        if (stopRequestedRef.current) return;
+        if (stopRequestedRef.current || shouldCancel?.()) return;
         const cur = getTargetTractor(tractorIdx);
 
         if (cur.fuel <= 0) {
@@ -680,30 +706,35 @@ export default function App() {
   );
 
   const actionGoToCoord = useCallback(
-    async (targetX: number, targetZ: number, tractorIdx?: number) => {
+    async (
+      targetX: number,
+      targetZ: number,
+      tractorIdx?: number,
+      shouldCancel?: () => boolean
+    ) => {
       const size = tilesRef.current.length;
       const tx = Math.max(0, Math.min(size - 1, Math.round(targetX)));
       const tz = Math.max(0, Math.min(size - 1, Math.round(targetZ)));
 
       let guard = 0;
       while (guard < 60) {
-        if (stopRequestedRef.current) return;
+        if (stopRequestedRef.current || shouldCancel?.()) return;
         const cur = getTargetTractor(tractorIdx);
         if (cur.x === tx && cur.z === tz) break;
         guard++;
 
         if (cur.x < tx) {
           if (cur.direction !== 'timur') await actionTurn('east', tractorIdx);
-          await actionMove(1, tractorIdx);
+          await actionMove(1, tractorIdx, shouldCancel);
         } else if (cur.x > tx) {
           if (cur.direction !== 'barat') await actionTurn('west', tractorIdx);
-          await actionMove(1, tractorIdx);
+          await actionMove(1, tractorIdx, shouldCancel);
         } else if (cur.z < tz) {
           if (cur.direction !== 'selatan') await actionTurn('south', tractorIdx);
-          await actionMove(1, tractorIdx);
+          await actionMove(1, tractorIdx, shouldCancel);
         } else if (cur.z > tz) {
           if (cur.direction !== 'utara') await actionTurn('north', tractorIdx);
-          await actionMove(1, tractorIdx);
+          await actionMove(1, tractorIdx, shouldCancel);
         }
       }
     },
@@ -711,17 +742,17 @@ export default function App() {
   );
 
   const actionGoToFuel = useCallback(
-    async (tractorIdx?: number) => {
-      await actionGoToCoord(0, 0, tractorIdx);
+    async (tractorIdx?: number, shouldCancel?: () => boolean) => {
+      await actionGoToCoord(0, 0, tractorIdx, shouldCancel);
       await sleepTick(150);
     },
     [actionGoToCoord]
   );
 
   const actionGoToBarn = useCallback(
-    async (tractorIdx?: number) => {
+    async (tractorIdx?: number, shouldCancel?: () => boolean) => {
       const size = tilesRef.current.length;
-      await actionGoToCoord(size - 1, 0, tractorIdx);
+      await actionGoToCoord(size - 1, 0, tractorIdx, shouldCancel);
       await sleepTick(150);
     },
     [actionGoToCoord]
@@ -830,41 +861,87 @@ export default function App() {
     await sleepTick(200);
   }, [addLog, getNodeLevel]);
 
-  // Execute Python Code from any Floating Pop-up Window
+  // Execute Python Code from any Floating Pop-up Window (Supports Concurrent Multi-Tab Execution)
   const startPythonExecution = useCallback(
     async (stepMode: boolean, targetScriptId?: string) => {
-      if (isRunningCode) {
-        if (stepMode && stepGateResolverRef.current) {
-          const resolve = stepGateResolverRef.current;
-          stepGateResolverRef.current = null;
+      const idToRun = targetScriptId || activeScriptId;
+      const existingCtx = runningContextsRef.current[idToRun];
+
+      // If THIS specific script tab is already running, handle Step or Play resume for it
+      if (existingCtx) {
+        if (stepMode && existingCtx.stepGateResolver) {
+          const resolve = existingCtx.stepGateResolver;
+          existingCtx.stepGateResolver = null;
           resolve();
           return;
         }
-        if (!stepMode && isStepModeRef.current && stepGateResolverRef.current) {
-          isStepModeRef.current = false;
+        if (!stepMode && existingCtx.isStepMode && existingCtx.stepGateResolver) {
+          existingCtx.isStepMode = false;
+          setStepWaitingScriptIds((prev) => prev.filter((id) => id !== idToRun));
           setIsStepMode(false);
-          const resolve = stepGateResolverRef.current;
-          stepGateResolverRef.current = null;
+          const resolve = existingCtx.stepGateResolver;
+          existingCtx.stepGateResolver = null;
           resolve();
           return;
         }
         return;
       }
 
-      const idToRun = targetScriptId || activeScriptId;
-      const activeTab = scripts.find((s) => s.id === idToRun) || scripts[0];
+      const activeTab = scriptsRef.current.find((s) => s.id === idToRun) || scriptsRef.current[0];
+      if (!activeTab) return;
+
+      // Determine default tractor for this script tab:
+      // If multiple tractors are unlocked and another script is already using Tractor #1 (idx 0),
+      // pick the first free tractor index so concurrent script tabs automatically control different tractors if available!
+      const totalTractors = 1 + extraTractorsRef.current.length;
+      const busyTractorIndices = new Set(
+        Object.values(runningContextsRef.current).map((c) => c.tractorIdx)
+      );
+      let defaultTractorIdx = 0;
+      for (let tIdx = 0; tIdx < totalTractors; tIdx++) {
+        if (!busyTractorIndices.has(tIdx)) {
+          defaultTractorIdx = tIdx;
+          break;
+        }
+      }
+
+      const scriptCtx = {
+        stopRequested: false,
+        isStepMode: stepMode,
+        stepGateResolver: null as (() => void) | null,
+        tractorIdx: defaultTractorIdx,
+      };
+      runningContextsRef.current[activeTab.id] = scriptCtx;
+
+      stopRequestedRef.current = false;
       setActiveScriptId(activeTab.id);
       setRunningScriptId(activeTab.id);
-      stopRequestedRef.current = false;
-      isStepModeRef.current = stepMode;
-      setIsStepMode(stepMode);
+      setRunningScriptIds((prev) =>
+        prev.includes(activeTab.id) ? prev : [...prev, activeTab.id]
+      );
+      if (stepMode) {
+        setStepWaitingScriptIds((prev) =>
+          prev.includes(activeTab.id) ? prev : [...prev, activeTab.id]
+        );
+        setIsStepMode(true);
+      }
       setIsRunningCode(true);
 
-      addLog('info', `Running '${activeTab.name}'...`);
+      addLog(
+        'info',
+        totalTractors > 1
+          ? `Running '${activeTab.name}' (Tractor #${defaultTractorIdx + 1})...`
+          : `Running '${activeTab.name}'...`
+      );
+
+      const resolveTractorIdx = (idx?: number) =>
+        idx !== undefined ? idx : scriptCtx.tractorIdx;
+      const shouldCancelThis = () =>
+        stopRequestedRef.current || scriptCtx.stopRequested;
 
       const interpreter = new AgroPythonInterpreter({
         getTractorState: (idx) => {
-          const t = getTargetTractor(idx);
+          const t = getTargetTractor(resolveTractorIdx(idx));
           return {
             x: t.x,
             z: t.z,
@@ -879,7 +956,7 @@ export default function App() {
         getTractorCount: () => 1 + extraTractorsRef.current.length,
         getWorldSize: () => tilesRef.current.length,
         checkSoil: (idx) => {
-          const { x, z } = getTargetTractor(idx);
+          const { x, z } = getTargetTractor(resolveTractorIdx(idx));
           const t = tilesRef.current[z][x];
           if (t.terrain === 'pom_bensin') return 'fuel_station';
           if (t.terrain === 'gudang') return 'barn';
@@ -890,12 +967,12 @@ export default function App() {
           return 'wild';
         },
         canHarvest: (idx) => {
-          const { x, z } = getTargetTractor(idx);
+          const { x, z } = getTargetTractor(resolveTractorIdx(idx));
           const t = tilesRef.current[z][x];
           return t.soilState === 'siap_panen';
         },
         measureCrop: (idx) => {
-          const { x, z } = getTargetTractor(idx);
+          const { x, z } = getTargetTractor(resolveTractorIdx(idx));
           const t = tilesRef.current[z][x];
           return Math.round((t.growth || 0) * 100);
         },
@@ -909,33 +986,39 @@ export default function App() {
           return match ? match.code : null;
         },
         setActiveTractorIndex: (idx) => {
-          activeTractorIdxRef.current = Math.max(0, Math.min(3, idx));
+          const clamped = Math.max(0, Math.min(3, idx));
+          scriptCtx.tractorIdx = clamped;
+          activeTractorIdxRef.current = clamped;
         },
         setSimSpeed: (spd) => {
           speedRef.current = spd;
           setExecutionSpeed(spd);
         },
         startHelper: actionStartHelper,
-        fertilize: actionFertilize,
+        fertilize: (idx) => actionFertilize(resolveTractorIdx(idx)),
         clearField: actionClearField,
-        move: actionMove,
-        turn: actionTurn,
-        equip: actionEquip,
-        plow: actionPlow,
-        plant: actionPlant,
-        harvest: actionHarvest,
-        refuel: actionRefuel,
-        deliver: actionDeliver,
-        goToFuel: actionGoToFuel,
-        goToBarn: actionGoToBarn,
-        goToCoord: actionGoToCoord,
-        onActiveLine: (ln) => setActiveLine(ln),
+        move: (arg, idx) => actionMove(arg, resolveTractorIdx(idx), shouldCancelThis),
+        turn: (dir, idx) => actionTurn(dir, resolveTractorIdx(idx)),
+        equip: (tool, idx) => actionEquip(tool, resolveTractorIdx(idx)),
+        plow: (idx) => actionPlow(resolveTractorIdx(idx)),
+        plant: (seed, idx) => actionPlant(seed, resolveTractorIdx(idx)),
+        harvest: (idx) => actionHarvest(resolveTractorIdx(idx)),
+        refuel: (idx) => actionRefuel(resolveTractorIdx(idx)),
+        deliver: (idx) => actionDeliver(resolveTractorIdx(idx)),
+        goToFuel: (idx) => actionGoToFuel(resolveTractorIdx(idx), shouldCancelThis),
+        goToBarn: (idx) => actionGoToBarn(resolveTractorIdx(idx), shouldCancelThis),
+        goToCoord: (tx, tz, idx) =>
+          actionGoToCoord(tx, tz, resolveTractorIdx(idx), shouldCancelThis),
+        onActiveLine: (ln) => {
+          setActiveLine(ln);
+          setActiveLinesByScript((prev) => ({ ...prev, [activeTab.id]: ln }));
+        },
         onLog: addLog,
-        shouldStop: () => stopRequestedRef.current,
+        shouldStop: shouldCancelThis,
         waitStepGate: async () => {
-          if (!isStepModeRef.current) return;
+          if (!scriptCtx.isStepMode) return;
           await new Promise<void>((resolve) => {
-            stepGateResolverRef.current = resolve;
+            scriptCtx.stepGateResolver = resolve;
           });
         },
       });
@@ -943,27 +1026,38 @@ export default function App() {
       try {
         if (stepMode) {
           setTimeout(() => {
-            if (stepGateResolverRef.current) {
-              const r = stepGateResolverRef.current;
-              stepGateResolverRef.current = null;
+            if (scriptCtx.stepGateResolver) {
+              const r = scriptCtx.stepGateResolver;
+              scriptCtx.stepGateResolver = null;
               r();
             }
           }, 20);
         }
         await interpreter.execute(activeTab.code);
-        if (!stopRequestedRef.current) {
+        if (!shouldCancelThis()) {
           addLog('info', `Finished '${activeTab.name}'.`);
         }
       } catch (err: any) {
         soundFX.playError();
-        addLog('error', err?.message || 'Python execution error.');
+        addLog('error', `[${activeTab.name}] ${err?.message || 'Python execution error.'}`);
       } finally {
-        setIsRunningCode(false);
-        setRunningScriptId(null);
-        setIsStepMode(false);
-        isStepModeRef.current = false;
-        stepGateResolverRef.current = null;
-        setActiveLine(null);
+        delete runningContextsRef.current[activeTab.id];
+        const remainingIds = Object.keys(runningContextsRef.current);
+        setRunningScriptIds(remainingIds);
+        setStepWaitingScriptIds((prev) => prev.filter((id) => id !== activeTab.id));
+        setActiveLinesByScript((prev) => {
+          const next = { ...prev };
+          delete next[activeTab.id];
+          return next;
+        });
+        setIsRunningCode(remainingIds.length > 0);
+        setRunningScriptId(remainingIds[remainingIds.length - 1] ?? null);
+        setIsStepMode(
+          remainingIds.some((id) => runningContextsRef.current[id]?.isStepMode)
+        );
+        if (remainingIds.length === 0) {
+          setActiveLine(null);
+        }
       }
     },
     [
@@ -985,24 +1079,68 @@ export default function App() {
       addLog,
       getTargetTractor,
       isNodeUnlocked,
-      isRunningCode,
-      scripts,
     ]
   );
 
-  const stopPythonExecution = useCallback(() => {
-    stopRequestedRef.current = true;
-    if (stepGateResolverRef.current) {
-      const r = stepGateResolverRef.current;
-      stepGateResolverRef.current = null;
-      r();
-    }
-    setIsRunningCode(false);
-    setRunningScriptId(null);
-    setIsStepMode(false);
-    setActiveLine(null);
-    addLog('warn', 'Execution stopped.');
-  }, [addLog]);
+  const stopPythonExecution = useCallback(
+    (targetScriptId?: string) => {
+      if (targetScriptId && runningContextsRef.current[targetScriptId]) {
+        const ctx = runningContextsRef.current[targetScriptId];
+        ctx.stopRequested = true;
+        if (ctx.stepGateResolver) {
+          const r = ctx.stepGateResolver;
+          ctx.stepGateResolver = null;
+          r();
+        }
+        delete runningContextsRef.current[targetScriptId];
+        const remainingIds = Object.keys(runningContextsRef.current);
+        setRunningScriptIds(remainingIds);
+        setStepWaitingScriptIds((prev) => prev.filter((id) => id !== targetScriptId));
+        setActiveLinesByScript((prev) => {
+          const next = { ...prev };
+          delete next[targetScriptId];
+          return next;
+        });
+        setIsRunningCode(remainingIds.length > 0);
+        setRunningScriptId(remainingIds[remainingIds.length - 1] ?? null);
+        setIsStepMode(
+          remainingIds.some((id) => runningContextsRef.current[id]?.isStepMode)
+        );
+        if (remainingIds.length === 0) {
+          setActiveLine(null);
+        }
+        const stoppedTab = scriptsRef.current.find((s) => s.id === targetScriptId);
+        addLog('warn', `Stopped '${stoppedTab?.name || targetScriptId}'.`);
+        return;
+      }
+
+      // Stop all running scripts
+      stopRequestedRef.current = true;
+      Object.values(runningContextsRef.current).forEach((ctx) => {
+        ctx.stopRequested = true;
+        if (ctx.stepGateResolver) {
+          const r = ctx.stepGateResolver;
+          ctx.stepGateResolver = null;
+          r();
+        }
+      });
+      runningContextsRef.current = {};
+      if (stepGateResolverRef.current) {
+        const r = stepGateResolverRef.current;
+        stepGateResolverRef.current = null;
+        r();
+      }
+      setRunningScriptIds([]);
+      setStepWaitingScriptIds([]);
+      setActiveLinesByScript({});
+      setIsRunningCode(false);
+      setRunningScriptId(null);
+      setIsStepMode(false);
+      setActiveLine(null);
+      addLog('warn', 'Execution stopped.');
+    },
+    [addLog]
+  );
 
   // Spawn a new floating script pop-up window when clicking "+"
   const handleSpawnNewScriptPopup = useCallback(
@@ -1034,7 +1172,10 @@ export default function App() {
       const newTab: ScriptTab = {
         id: newId,
         name: defaultName,
-        code: `def ${defaultName.replace(/[^a-zA-Z0-9_]/g, '_')}():\n    plow()\n    plant("wheat")\n    move(1)\n\nwhile True:\n    ${defaultName.replace(/[^a-zA-Z0-9_]/g, '_')}()\n`,
+        code:
+          gameModeRef.current === 'sandbox'
+            ? `def ${defaultName.replace(/[^a-zA-Z0-9_]/g, '_')}():\n    plow()\n    plant("wheat")\n    move(1)\n\nwhile True:\n    ${defaultName.replace(/[^a-zA-Z0-9_]/g, '_')}()\n`
+            : `# Tulis kode Python kamu di sini\n`,
         isOpen: true,
         isMinimized: false,
         x: clampedX,
@@ -1055,22 +1196,27 @@ export default function App() {
     const node = techNodes.find((n) => n.id === nodeId);
     if (!node || node.level >= node.maxLevel) return;
 
+    const isSandbox = gameModeRef.current === 'sandbox';
     const currentCosts = getUpgradeCostsForNode(node);
-    for (const cost of currentCosts) {
-      if (warehouse[cost.resource] < cost.amount) return;
+    if (!isSandbox) {
+      for (const cost of currentCosts) {
+        if (warehouse[cost.resource] < cost.amount) return;
+      }
     }
 
     const nextLevel = node.level + 1;
     soundFX.playUnlock();
 
-    setWarehouse((prev) => {
-      const next = { ...prev };
-      currentCosts.forEach((c) => {
-        next[c.resource] = Math.max(0, next[c.resource] - c.amount);
+    if (!isSandbox) {
+      setWarehouse((prev) => {
+        const next = { ...prev };
+        currentCosts.forEach((c) => {
+          next[c.resource] = Math.max(0, next[c.resource] - c.amount);
+        });
+        warehouseRef.current = next;
+        return next;
       });
-      warehouseRef.current = next;
-      return next;
-    });
+    }
 
     setTechNodes((prev) => {
       const next = prev.map((n) =>
@@ -1203,6 +1349,7 @@ export default function App() {
         slotTitle: slotTitle || defaultTitles[slotId] || 'Save Game',
         savedAt: `${formattedDate}, ${formattedTime}`,
         timestamp: Date.now(),
+        gameMode: gameModeRef.current,
         tiles: deepClone(tilesRef.current),
         warehouse: deepClone(warehouseRef.current),
         tractor: deepClone(tractorRef.current),
@@ -1252,6 +1399,10 @@ export default function App() {
       if (!slot) return;
 
       stopPythonExecution();
+
+      const restoredMode: 'normal' | 'sandbox' = slot.gameMode === 'sandbox' ? 'sandbox' : 'normal';
+      gameModeRef.current = restoredMode;
+      setGameMode(restoredMode);
 
       // 1. Restore Tech Tree Progress first so island size & irrigation level are known
       let restoredNodes = deepClone(INITIAL_TECH_NODES);
@@ -1398,36 +1549,51 @@ export default function App() {
     [triggerSaveToast]
   );
 
-  const handleStartNewGame = useCallback(() => {
-    stopPythonExecution();
-    const freshGrid = createInitialGrid(4, 0);
-    tilesRef.current = freshGrid;
-    setTiles(freshGrid);
-    const freshWarehouse = { jerami: 4, kayu: 0, wortel: 0, jagung: 0 };
-    warehouseRef.current = freshWarehouse;
-    setWarehouse(freshWarehouse);
-    const freshTractor = deepClone(DEFAULT_TRACTOR_STATE);
-    tractorRef.current = freshTractor;
-    setTractor(freshTractor);
-    extraTractorsRef.current = [];
-    setExtraTractors([]);
-    const freshNodes = deepClone(INITIAL_TECH_NODES);
-    techNodesRef.current = freshNodes;
-    setTechNodes(freshNodes);
-    const freshScripts = deepClone(INITIAL_SCRIPTS);
-    scriptsRef.current = freshScripts;
-    setScripts(freshScripts);
-    activeScriptIdRef.current = 'main';
-    setActiveScriptId('main');
-    setSelectedTile({ x: 1, z: 1 });
-    setConfirmOverwriteSlot(null);
-    setIsEditorOpen(true);
-    setShowMainMenuSlots(false);
-    setShowMainMenuOptions(false);
-    setIsDocsModalOpen(true);
-    setScreen('playing');
-    addLog('info', 'Started a New Game (Existing Save Slots are preserved).');
-  }, [addLog, stopPythonExecution]);
+  const handleStartNewGame = useCallback(
+    (selectedMode: 'normal' | 'sandbox' = 'normal') => {
+      stopPythonExecution();
+      gameModeRef.current = selectedMode;
+      setGameMode(selectedMode);
+
+      const freshGrid = createInitialGrid(4, 0);
+      tilesRef.current = freshGrid;
+      setTiles(freshGrid);
+      const freshWarehouse = { jerami: 4, kayu: 0, wortel: 0, jagung: 0 };
+      warehouseRef.current = freshWarehouse;
+      setWarehouse(freshWarehouse);
+      const freshTractor = deepClone(DEFAULT_TRACTOR_STATE);
+      tractorRef.current = freshTractor;
+      setTractor(freshTractor);
+      extraTractorsRef.current = [];
+      setExtraTractors([]);
+      const freshNodes = deepClone(INITIAL_TECH_NODES);
+      techNodesRef.current = freshNodes;
+      setTechNodes(freshNodes);
+
+      const freshScripts = deepClone(
+        selectedMode === 'sandbox' ? SANDBOX_INITIAL_SCRIPTS : NORMAL_INITIAL_SCRIPTS
+      );
+      scriptsRef.current = freshScripts;
+      setScripts(freshScripts);
+      activeScriptIdRef.current = 'main';
+      setActiveScriptId('main');
+      setSelectedTile({ x: 1, z: 1 });
+      setConfirmOverwriteSlot(null);
+      setIsEditorOpen(true);
+      setShowMainMenuSlots(false);
+      setShowMainMenuOptions(false);
+      setShowNewGameModeSelect(false);
+      setIsDocsModalOpen(true);
+      setScreen('playing');
+      addLog(
+        'info',
+        selectedMode === 'sandbox'
+          ? 'Started a New Game in SANDBOX Mode (Pre-made Python scripts loaded & Free Tech Tree upgrades!).'
+          : 'Started a New Game in NORMAL Mode (Existing Save Slots are preserved).'
+      );
+    },
+    [addLog, stopPythonExecution]
+  );
 
   // Get most recent explicit user save slot (slot_1, slot_2, slot_3) for "Lanjutkan Permainan"
   const latestSaveSlot = (['slot_1', 'slot_2', 'slot_3'] as const)
@@ -1569,7 +1735,7 @@ export default function App() {
             </p>
 
             {/* Main Menu Action Buttons */}
-            {!showMainMenuSlots && !showMainMenuOptions ? (
+            {!showMainMenuSlots && !showMainMenuOptions && !showNewGameModeSelect ? (
               <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs">
                 {latestSaveSlot && (
                   <button
@@ -1581,7 +1747,11 @@ export default function App() {
                 )}
 
                 <button
-                  onClick={handleStartNewGame}
+                  onClick={() => {
+                    setShowMainMenuSlots(false);
+                    setShowMainMenuOptions(false);
+                    setShowNewGameModeSelect(true);
+                  }}
                   className={`w-full px-6 py-2.5 rounded-md font-mono-code font-bold text-xs tracking-wide border shadow-lg transition-all cursor-pointer flex items-center justify-center active:scale-95 ${
                     latestSaveSlot
                       ? 'bg-[#232527]/95 hover:bg-[#323639] text-[#E2E8F0] border-[#5A6065]'
@@ -1594,6 +1764,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setShowMainMenuOptions(false);
+                    setShowNewGameModeSelect(false);
                     setShowMainMenuSlots(true);
                   }}
                   className="w-full px-6 py-2.5 rounded-md bg-[#232527]/95 hover:bg-[#323639] active:scale-95 text-[#E2E8F0] font-mono-code font-bold text-xs tracking-wide border border-[#5A6065] shadow-lg transition-all cursor-pointer flex items-center justify-center"
@@ -1604,12 +1775,81 @@ export default function App() {
                 <button
                   onClick={() => {
                     setShowMainMenuSlots(false);
+                    setShowNewGameModeSelect(false);
                     setShowMainMenuOptions(true);
                   }}
                   className="w-full px-6 py-2.5 rounded-md bg-[#232527]/95 hover:bg-[#323639] active:scale-95 text-[#E2E8F0] font-mono-code font-bold text-xs tracking-wide border border-[#5A6065] shadow-lg transition-all cursor-pointer flex items-center justify-center"
                 >
                   <span>OPTION</span>
                 </button>
+              </div>
+            ) : showNewGameModeSelect ? (
+              /* Main Menu NEW GAME Mode Selection (Normal vs Sandbox) */
+              <div className="mt-6 w-full max-w-md rounded-lg border-2 border-[#686E74] bg-[#232527]/95 p-4 text-left shadow-2xl space-y-3">
+                <div className="flex items-center justify-between border-b border-[#3D4145] pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-display font-bold text-white">
+                      Pilih Mode Permainan (New Game)
+                    </h3>
+                    <p className="text-[11px] font-mono-code text-[#9BA3AB]">
+                      Pilih Mode Normal atau Mode Sandbox untuk memulai
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowNewGameModeSelect(false)}
+                    className="w-7 h-7 rounded bg-[#C93B2B] hover:bg-[#E04535] text-white font-mono-code font-bold text-xs flex items-center justify-center cursor-pointer"
+                    title="Kembali ke Main Menu"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {/* Normal Mode Option */}
+                  <button
+                    onClick={() => handleStartNewGame('normal')}
+                    className="w-full text-left rounded-md border-2 border-[#5A6065] hover:border-[#9CD03B] bg-[#2D3033] hover:bg-[#35393D] p-3.5 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-display font-bold text-sm text-white group-hover:text-[#B8F252]">
+                        MODE NORMAL
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-[#3B4045] text-[#E2E8F0] font-mono-code text-[10px] font-bold">
+                        Standar
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-[#B8BFC6] leading-relaxed">
+                      Mulai dari awal dengan editor Python kosong, kumpulkan hasil panen ke Gudang, dan buka upgrade Tech Tree menggunakan hasil panen.
+                    </p>
+                  </button>
+
+                  {/* Sandbox Mode Option */}
+                  <button
+                    onClick={() => handleStartNewGame('sandbox')}
+                    className="w-full text-left rounded-md border-2 border-[#658B1E] hover:border-[#B8F252] bg-[#27321C] hover:bg-[#303E22] p-3.5 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-display font-bold text-sm text-[#B8F252]">
+                        MODE SANDBOX
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-[#658B1E] text-white font-mono-code text-[10px] font-bold border border-[#9CD03B]">
+                        Kode Siap Pakai + Tech Gratis
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-[#DCE5D2] leading-relaxed">
+                      Langsung dilengkapi berbagai tab kode Python yang sudah jadi (tinggal tekan Play ▶ untuk menjalankan traktor) dan seluruh upgrade Tech Tree GRATIS!
+                    </p>
+                  </button>
+                </div>
+
+                <div className="pt-1 flex justify-end">
+                  <button
+                    onClick={() => setShowNewGameModeSelect(false)}
+                    className="px-4 py-1.5 rounded bg-[#383C40] hover:bg-[#494E53] text-white font-mono-code text-xs cursor-pointer"
+                  >
+                    Kembali
+                  </button>
+                </div>
               </div>
             ) : showMainMenuOptions ? (
               /* Main Menu OPTION Panel (Music & SFX Audio Settings Only) */
@@ -2000,6 +2240,9 @@ export default function App() {
           scripts={scripts}
           activeScriptId={activeScriptId}
           runningScriptId={runningScriptId}
+          runningScriptIds={runningScriptIds}
+          stepWaitingScriptIds={stepWaitingScriptIds}
+          activeLines={activeLinesByScript}
           newlyCreatedId={newlyCreatedId}
           onClearNewlyCreated={() => setNewlyCreatedId(null)}
           onSelectScript={(id) => {
@@ -2012,15 +2255,19 @@ export default function App() {
             });
           }}
           onUpdateCode={(scriptId, newCode) =>
-            setScripts((prev) =>
-              prev.map((s) => (s.id === scriptId ? { ...s, code: newCode } : s))
-            )
+            setScripts((prev) => {
+              const next = prev.map((s) => (s.id === scriptId ? { ...s, code: newCode } : s));
+              scriptsRef.current = next;
+              return next;
+            })
           }
           onAddScript={(customName) => handleSpawnNewScriptPopup(customName)}
           onRenameScript={(id, newName) => {
-            setScripts((prev) =>
-              prev.map((s) => (s.id === id ? { ...s, name: newName } : s))
-            );
+            setScripts((prev) => {
+              const next = prev.map((s) => (s.id === id ? { ...s, name: newName } : s));
+              scriptsRef.current = next;
+              return next;
+            });
           }}
           onToggleMinimizeScript={(id) => {
             setScripts((prev) =>
@@ -2037,6 +2284,9 @@ export default function App() {
                 return prev.map((s) =>
                   s.id === id ? { ...s, isMinimized: true } : s
                 );
+              }
+              if (runningContextsRef.current[id]) {
+                stopPythonExecution(id);
               }
               return prev.map((s) =>
                 s.id === id ? { ...s, isOpen: false } : s
@@ -2058,7 +2308,7 @@ export default function App() {
           activeLine={activeLine}
           onRun={(scriptId) => void startPythonExecution(false, scriptId)}
           onStep={(scriptId) => void startPythonExecution(true, scriptId)}
-          onStop={stopPythonExecution}
+          onStop={(scriptId) => stopPythonExecution(scriptId)}
           logs={logs}
           onClearLogs={() => setLogs([])}
           executionSpeed={executionSpeed}
@@ -2373,6 +2623,7 @@ export default function App() {
         nodes={techNodes}
         inventory={warehouse}
         onUnlockNode={handleUnlockTechNode}
+        isSandboxMode={gameMode === 'sandbox'}
       />
 
       <ApiDocsModal

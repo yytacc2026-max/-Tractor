@@ -8,6 +8,7 @@ interface TechTreeModalProps {
   nodes: TechNode[];
   inventory: Inventory;
   onUnlockNode: (nodeId: string) => void;
+  isSandboxMode?: boolean;
 }
 
 export const RESOURCE_LABELS: Record<keyof Inventory, string> = {
@@ -297,6 +298,7 @@ export const TechTreeModal: React.FC<TechTreeModalProps> = ({
   nodes,
   inventory,
   onUnlockNode,
+  isSandboxMode = false,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string>('logistik_ekspansi');
 
@@ -328,6 +330,7 @@ export const TechTreeModal: React.FC<TechTreeModalProps> = ({
   if (!isOpen) return null;
 
   const isPrerequisiteMet = (node: TechNode) => {
+    if (isSandboxMode) return true;
     if (!node.prerequisiteId) return true;
     const pre = nodes.find((n) => n.id === node.prerequisiteId);
     return pre ? pre.unlocked || pre.level > 0 : true;
@@ -335,6 +338,7 @@ export const TechTreeModal: React.FC<TechTreeModalProps> = ({
 
   const canUpgradeOrUnlock = (node: TechNode) => {
     if (node.level >= node.maxLevel) return false;
+    if (isSandboxMode) return true;
     if (!isPrerequisiteMet(node)) return false;
     const currentCosts = getUpgradeCostsForNode(node);
     return currentCosts.every((c) => inventory[c.resource] >= c.amount);
@@ -405,6 +409,11 @@ export const TechTreeModal: React.FC<TechTreeModalProps> = ({
             <span className="text-[10px] text-[#9099A2]">{RESOURCE_LABELS[resKey]}</span>
           </div>
         ))}
+        {isSandboxMode && (
+          <div className="ml-2 px-3 py-1.5 rounded bg-[#2B3D1B] border border-[#9CD03B] text-[#B8F252] font-mono-code text-xs font-bold">
+            MODE SANDBOX — Semua Upgrade Tech Gratis!
+          </div>
+        )}
       </div>
 
       {/* Top-Right Return to 3D Farm Red X Button */}
@@ -479,6 +488,17 @@ export const TechTreeModal: React.FC<TechTreeModalProps> = ({
                   ? `Level Maksimum (${selectedNode.level} / ${selectedNode.maxLevel})`
                   : 'Sudah Terbuka (Unlocked)'}
               </span>
+            ) : isSandboxMode ? (
+              <>
+                <span className="text-[10px] text-[#9099A2]">
+                  {selectedNode.maxLevel > 1
+                    ? `Biaya Upgrade ke Lv.${selectedNode.level + 1}:`
+                    : 'Biaya Unlock:'}
+                </span>
+                <span className="text-xs font-bold text-[#B8F252] mt-0.5">
+                  GRATIS (Mode Sandbox)
+                </span>
+              </>
             ) : (
               <>
                 <span className="text-[10px] text-[#9099A2]">
