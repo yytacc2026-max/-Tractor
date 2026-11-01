@@ -1236,38 +1236,8 @@ export const ApiDocsModal: React.FC<ApiDocsModalProps> = ({
           )}
         </div>
 
-        {/* Bottom Stepper Footer (Prev / Step Numbers / Next) */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 bg-[#282B2E] border-t border-[#3E4246] shrink-0">
-          <button
-            onClick={() => setCurrentStepIdx((prev) => Math.max(0, prev - 1))}
-            disabled={!hasPrev}
-            className={`px-3.5 py-1.5 rounded font-mono-code text-xs font-bold border transition-colors ${
-              hasPrev
-                ? 'bg-[#363A3E] hover:bg-[#484D52] text-white border-[#5A6065] cursor-pointer'
-                : 'bg-[#222528] text-[#585E64] border-[#32363A] cursor-not-allowed'
-            }`}
-          >
-            ← Sebelumnya
-          </button>
-
-          {/* Direct Step Number Buttons (1..8) */}
-          <div className="flex items-center gap-1">
-            {TUTORIAL_STEPS.map((item, idx) => (
-              <button
-                key={item.stepNumber}
-                onClick={() => setCurrentStepIdx(idx)}
-                title={item.title}
-                className={`w-7 h-7 rounded font-mono-code text-xs font-bold transition-colors cursor-pointer ${
-                  idx === currentStepIdx
-                    ? 'bg-[#658B1E] text-white border border-[#9CD03B]'
-                    : 'bg-[#1C1E20] hover:bg-[#34383C] text-[#9BA3AB] border border-[#383C40]'
-                }`}
-              >
-                {item.stepNumber}
-              </button>
-            ))}
-          </div>
-
+        {/* Bottom Stepper Footer (Next) */}
+        <div className="flex flex-wrap items-center justify-end gap-3 px-5 py-3 bg-[#282B2E] border-t border-[#3E4246] shrink-0">
           {hasNext ? (
             <button
               onClick={() => setCurrentStepIdx((prev) => Math.min(totalSteps - 1, prev + 1))}

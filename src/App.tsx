@@ -39,7 +39,7 @@ import {
   readSyncSaveSlots,
 } from './utils/saveStorage';
 
-function createInitialGrid(size: number, irrigationLevel = 0): TileData[][] {
+function createInitialGrid(size: number, _irrigationLevel = 0): TileData[][] {
   const grid: TileData[][] = [];
   for (let z = 0; z < size; z++) {
     const row: TileData[] = [];
@@ -53,7 +53,7 @@ function createInitialGrid(size: number, irrigationLevel = 0): TileData[][] {
         terrain = 'pom_bensin';
       } else if (x === size - 1 && z === 0) {
         terrain = 'gudang';
-      } else if (irrigationLevel === 0 && ((x === 1 && z === 2) || (x === 2 && z === 3))) {
+      } else if ((x === 1 && z === 2) || (x === 2 && z === 3)) {
         terrain = 'lumpur';
       } else if ((x === 1 && z === 1) || (x === 2 && z === 1)) {
         soilState = 'siap_panen';
@@ -65,6 +65,35 @@ function createInitialGrid(size: number, irrigationLevel = 0): TileData[][] {
     }
     grid.push(row);
   }
+
+  // Scatter random decorative mud patches in expanded island rings (for sizes > 4)
+  for (let ringStart = 4; ringStart < size; ringStart += 2) {
+    const ringEnd = Math.min(size, ringStart + 2);
+    const candidates: { x: number; z: number }[] = [];
+    for (let z = 0; z < ringEnd; z++) {
+      for (let x = 0; x < ringEnd; x++) {
+        if (x < ringStart && z < ringStart) continue;
+        if (x === 0 && z === 0) continue;
+        if (x === size - 1 && z === 0) continue;
+        if (grid[z][x].terrain === 'tanah' && grid[z][x].soilState === 'liar') {
+          candidates.push({ x, z });
+        }
+      }
+    }
+    // Shuffle candidates randomly
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = candidates[i];
+      candidates[i] = candidates[j];
+      candidates[j] = tmp;
+    }
+    const mudCount = Math.max(3, Math.round(candidates.length * 0.22));
+    for (let i = 0; i < Math.min(mudCount, candidates.length); i++) {
+      const { x, z } = candidates[i];
+      grid[z][x].terrain = 'lumpur';
+    }
+  }
+
   return grid;
 }
 
@@ -393,7 +422,7 @@ export default function App() {
 
         const destTile = tilesRef.current[nz][nx];
         const isMud = destTile.terrain === 'lumpur';
-        const fuelCost = isMud ? 4 : 1.5;
+        const fuelCost = 1.5;
 
         soundFX.playMove(isMud, false);
 
@@ -407,7 +436,7 @@ export default function App() {
         }));
         setSelectedTile({ x: nx, z: nz });
 
-        await sleepTick(isMud ? 460 : 300);
+        await sleepTick(300);
 
         updateTargetTractor(tractorIdx, (prev) => ({ ...prev, isMoving: false }));
       }
@@ -852,13 +881,13 @@ export default function App() {
         checkSoil: (idx) => {
           const { x, z } = getTargetTractor(idx);
           const t = tilesRef.current[z][x];
-          if (t.terrain === 'lumpur') return 'mud';
           if (t.terrain === 'pom_bensin') return 'fuel_station';
           if (t.terrain === 'gudang') return 'barn';
-          if (t.soilState === 'liar') return 'wild';
           if (t.soilState === 'dibajak') return 'plowed';
           if (t.soilState === 'ditanam') return 'planted';
-          return 'ready';
+          if (t.soilState === 'siap_panen') return 'ready';
+          if (t.terrain === 'lumpur') return 'mud';
+          return 'wild';
         },
         canHarvest: (idx) => {
           const { x, z } = getTargetTractor(idx);
@@ -1092,12 +1121,7 @@ export default function App() {
         return next;
       });
     } else if (nodeId === 'logistik_irigasi') {
-      // Convert mud tiles into fertile soil
-      const nextGrid = tilesRef.current.map((row) =>
-        row.map((t) => (t.terrain === 'lumpur' ? { ...t, terrain: 'tanah' as const } : t))
-      );
-      tilesRef.current = nextGrid;
-      setTiles(nextGrid);
+      // Keep decorative mud patches intact while enabling auto-plow bonus on harvest
     } else if (nodeId === 'logistik_ekspansi') {
       const newSize = getIslandSizeForLevel(nextLevel);
       const irLv = getNodeLevel('logistik_irigasi');
@@ -1106,10 +1130,22 @@ export default function App() {
       const oldSize = oldGrid.length;
       for (let z = 0; z < Math.min(oldSize, newSize); z++) {
         for (let x = 0; x < Math.min(oldSize, newSize); x++) {
+          if (x === 0 && z === 0) continue;
+          if (x === newSize - 1 && z === 0) continue;
           const oldTile = oldGrid[z][x];
-          if (oldTile.terrain === 'tanah' && oldTile.soilState !== 'liar') {
+          if (oldTile.terrain === 'gudang') {
+            nextGrid[z][x] = {
+              x,
+              z,
+              terrain: 'tanah',
+              soilState: 'liar',
+              crop: null,
+              growth: 0,
+            };
+          } else {
             nextGrid[z][x] = {
               ...nextGrid[z][x],
+              terrain: oldTile.terrain,
               soilState: oldTile.soilState,
               crop: oldTile.crop,
               growth: oldTile.growth,
@@ -1244,10 +1280,13 @@ export default function App() {
         const expandedGrid = createInitialGrid(expectedMinSize, irLv);
         for (let z = 0; z < restoredTiles.length; z++) {
           for (let x = 0; x < restoredTiles.length; x++) {
+            if (x === 0 && z === 0) continue;
+            if (x === expectedMinSize - 1 && z === 0) continue;
             const oldT = restoredTiles[z][x];
-            if (oldT.terrain === 'tanah' && oldT.soilState !== 'liar') {
+            if (oldT.terrain !== 'gudang') {
               expandedGrid[z][x] = {
                 ...expandedGrid[z][x],
+                terrain: oldT.terrain,
                 soilState: oldT.soilState,
                 crop: oldT.crop,
                 growth: oldT.growth,
